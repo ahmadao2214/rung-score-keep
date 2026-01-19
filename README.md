@@ -128,6 +128,36 @@ Example (Round 5, 3 players):
 - Player 2 calls 3
 - Dealer CANNOT call 0 (would make total = 5)
 
+## Deployment
+
+### Deploy to Netlify
+
+The app is configured for easy deployment to Netlify:
+
+1. **Quick Deploy** (via Netlify Dashboard):
+   - Connect your GitHub repository to Netlify
+   - Build command: `npm run build:web`
+   - Publish directory: `dist`
+   - Deploy!
+
+2. **Via Netlify CLI**:
+   ```bash
+   npm install -g netlify-cli
+   netlify login
+   npm run build:web
+   netlify deploy --prod
+   ```
+
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed instructions.
+
+### Build for Web
+
+```bash
+npm run build:web
+```
+
+This creates a production-ready static site in the `dist/` directory.
+
 ## Development
 
 ### Adding New Features
