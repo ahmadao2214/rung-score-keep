@@ -1,13 +1,83 @@
-import { MMKV } from 'react-native-mmkv';
+import { Platform } from 'react-native';
+
+// Web polyfill for MMKV using localStorage
+const createWebStorage = () => ({
+  set: (key: string, value: string | number | boolean) => {
+    try {
+      if (typeof value === 'string') {
+        localStorage.setItem(key, value);
+      } else {
+        localStorage.setItem(key, JSON.stringify(value));
+      }
+    } catch (error) {
+      console.error('Failed to set localStorage:', error);
+    }
+  },
+  getString: (key: string): string | undefined => {
+    try {
+      return localStorage.getItem(key) || undefined;
+    } catch {
+      return undefined;
+    }
+  },
+  getNumber: (key: string): number | undefined => {
+    try {
+      const value = localStorage.getItem(key);
+      return value ? Number(value) : undefined;
+    } catch {
+      return undefined;
+    }
+  },
+  getBoolean: (key: string): boolean | undefined => {
+    try {
+      const value = localStorage.getItem(key);
+      return value ? value === 'true' : undefined;
+    } catch {
+      return undefined;
+    }
+  },
+  delete: (key: string) => {
+    try {
+      localStorage.removeItem(key);
+    } catch (error) {
+      console.error('Failed to delete from localStorage:', error);
+    }
+  },
+  clearAll: () => {
+    try {
+      localStorage.clear();
+    } catch (error) {
+      console.error('Failed to clear localStorage:', error);
+    }
+  },
+  contains: (key: string): boolean => {
+    try {
+      return localStorage.getItem(key) !== null;
+    } catch {
+      return false;
+    }
+  },
+});
 
 /**
- * Initialize MMKV storage instance
+ * Initialize MMKV storage instance (or localStorage polyfill on web)
  * This provides fast, synchronous key-value storage for offline-first architecture
  */
-export const storage = new MMKV({
-  id: 'rung-score-keeper',
-  encryptionKey: undefined, // Can add encryption later if needed
-});
+let storage: any;
+
+if (Platform.OS === 'web') {
+  // Use localStorage on web
+  storage = createWebStorage();
+} else {
+  // Use native MMKV on mobile
+  const { MMKV } = require('react-native-mmkv');
+  storage = new MMKV({
+    id: 'rung-score-keeper',
+    encryptionKey: undefined,
+  });
+}
+
+export { storage };
 
 /**
  * Storage keys used throughout the app
