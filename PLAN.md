@@ -11,8 +11,10 @@ A cross-platform (web, iOS, Android) score keeping application for the card game
 - **Language**: TypeScript (strict mode)
 - **UI Library**: Tamagui (cross-platform UI components)
 - **Backend**: Convex (real-time database and backend)
+- **Local Storage**: React Native MMKV (fast, synchronous key-value storage)
 - **State Management**: React hooks + Convex queries/mutations
 - **Development**: Expo Go for testing, EAS for builds
+- **Offline Support**: MMKV for local persistence + Convex sync
 
 ---
 
@@ -50,7 +52,6 @@ A cross-platform (web, iOS, Android) score keeping application for the card game
   _creationTime: number,
   gameId: Id<"games">,
   roundNumber: number, // 1-13 (number of cards dealt)
-  trumpCard?: string, // e.g., "A♠", "7♥"
 
   // Player calls and results
   playerRounds: Array<{
@@ -85,16 +86,13 @@ A cross-platform (web, iOS, Android) score keeping application for the card game
 ### File Structure
 ```
 app/
-├── (tabs)/                    # Tab-based navigation (if needed)
-├── _layout.tsx               # Root layout
+├── _layout.tsx               # Root layout with theme provider
 ├── index.tsx                 # Home/landing screen
-├── new-game.tsx              # Game setup
+├── new-game.tsx              # Game setup screen
 ├── game/
-│   ├── [id].tsx              # Active game screen (dynamic route)
-│   ├── round-calling.tsx     # Call entry screen
-│   └── round-results.tsx     # Result entry screen
-├── history.tsx               # Past games list
-└── settings.tsx              # App settings
+│   └── [id].tsx              # Active game screen (single screen, mode switching)
+├── history.tsx               # Past games list (nice-to-have)
+└── settings.tsx              # App settings (theme toggle, etc.)
 
 components/
 ├── ui/                       # Tamagui styled components
@@ -103,20 +101,28 @@ components/
 │   ├── Input.tsx
 │   └── PlayerCard.tsx
 ├── game/
-│   ├── PlayerList.tsx
-│   ├── ScoreTable.tsx
-│   ├── CallEntry.tsx
-│   ├── RoundSummary.tsx
-│   └── TrumpDisplay.tsx
+│   ├── GameModeSwitch.tsx    # Switches between calling/playing/scorecard modes
+│   ├── CallingMode.tsx       # Call entry UI with validation
+│   ├── PlayingMode.tsx       # Hands won tracking UI
+│   ├── ScorecardMode.tsx     # Full game scorecard view
+│   ├── ScoreTable.tsx        # Reusable score table component
+│   └── RoundHeader.tsx       # Round number, dealer indicator
 └── setup/
-    ├── PlayerSetup.tsx
-    └── DealerSelector.tsx
+    ├── PlayerSetup.tsx       # Player count + name inputs
+    └── DealerSelector.tsx    # Dealer selection UI
 
 convex/
 ├── schema.ts                 # Convex schema definitions
 ├── games.ts                  # Game CRUD operations
 ├── rounds.ts                 # Round operations
 └── scoring.ts                # Scoring logic (pure functions)
+
+lib/
+├── mmkv.ts                   # MMKV storage instance
+├── offline-sync.ts           # Offline queue management
+└── hooks/
+    ├── useMMKV.ts            # MMKV storage hooks
+    └── useOfflineSync.ts     # Sync hook for Convex
 
 utils/
 ├── scoring.ts                # Scoring calculations
@@ -164,11 +170,12 @@ createGame({
 
 **UI Components:**
 - Round indicator (e.g., "Round 3 - 3 cards each")
-- Trump card display (optional: randomly show a suit/rank)
 - Player list with call entry
-- Current player highlight
+- Current player highlight (shows whose turn to call)
 - Call validation message
 - "Start Playing" button (after all calls entered)
+
+**Note:** Trump card is handled during physical gameplay and not tracked in app
 
 **Key Logic:**
 - Players call in clockwise order starting from player after dealer
@@ -249,24 +256,35 @@ completeRound({
 
 ---
 
-### 4. Main Game Screen (`/game/[id]`)
+### 4. Main Game Screen (`/game/[id]`) - Single Screen with Mode Switching
 
-**Displays:**
-- Current round number
-- Mode: "Calling" or "Playing" or "Round Complete"
-- Scorecard table:
+**Three Modes in One Screen:**
+
+**Mode 1: Calling**
+- Show player list with call inputs
+- Highlight current player whose turn to call
+- Show validation errors (total calls ≠ round number)
+- "Start Playing" button when all calls entered
+
+**Mode 2: Playing**
+- Show each player with their call and hands won
+- Increment/decrement buttons for hands won
+- Auto-calculate and display points
+- "Complete Round" button when all hands tracked
+
+**Mode 3: Scorecard View**
+- Full scorecard table:
   - Columns: Player, Calls (R1, R2, ...), Points (R1, R2, ...), Total
   - Scrollable horizontally for many rounds
-- Action buttons based on state:
-  - "Start Round X" → enters calling phase
-  - "Enter Results" → enters playing phase
-  - "Next Round" → advances to next round
-  - "End Game" → marks game complete
+- "Start Round X" button to begin next round
+- "Edit Round X" buttons with confirmation dialog
+- "End Game" after round 13
 
 **State Management:**
 - Subscribe to Convex game and rounds data
-- Real-time updates if multiple scorers (future feature)
-- Local state for UI interactions
+- MMKV for local offline storage
+- Optimistic updates with offline queue
+- Real-time sync when online
 
 ---
 
@@ -317,10 +335,12 @@ completeRound({
 - [ ] Configure TypeScript (strict mode)
 - [ ] Install and configure Tamagui
 - [ ] Set up Convex backend
+- [ ] Install and configure React Native MMKV
 - [ ] Configure environment variables
 - [ ] Set up basic navigation structure
-- [ ] Create theme configuration
+- [ ] Create theme configuration (light + dark mode)
 - [ ] Set up .gitignore and basic README
+- [ ] Configure offline sync architecture
 
 ### Phase 2: Data Layer 📊
 - [ ] Define Convex schema (games, rounds tables)
@@ -328,6 +348,9 @@ completeRound({
 - [ ] Create round mutations (create, update calls, update results)
 - [ ] Implement scoring calculation functions
 - [ ] Create validation utilities
+- [ ] Set up MMKV storage layer and hooks
+- [ ] Implement offline mutation queue
+- [ ] Create sync utilities (MMKV ↔ Convex)
 - [ ] Write unit tests for scoring logic
 - [ ] Set up Convex dev environment
 
@@ -335,10 +358,12 @@ completeRound({
 - [ ] Create base Tamagui components (Button, Card, Input)
 - [ ] Build PlayerCard component
 - [ ] Build ScoreTable component (scrollable)
-- [ ] Build CallEntry component with validation
-- [ ] Build RoundSummary component
+- [ ] Build CallingMode component with validation
+- [ ] Build PlayingMode component
+- [ ] Build ScorecardMode component
 - [ ] Create loading and error states
-- [ ] Implement theme switching
+- [ ] Implement dark/light mode toggle
+- [ ] Add mode switching animations
 
 ### Phase 4: Game Setup Flow 🎮
 - [ ] Build new game screen
@@ -351,13 +376,12 @@ completeRound({
 - [ ] Add animations/transitions
 
 ### Phase 5: Calling Phase 📞
-- [ ] Build calling UI
 - [ ] Implement turn-based call entry
-- [ ] Add dealer validation logic
+- [ ] Add dealer validation logic (total calls ≠ round number)
 - [ ] Visual feedback for current player
 - [ ] Error messages for invalid calls
-- [ ] Connect to Convex mutations
-- [ ] Trump card display (random or manual entry)
+- [ ] Connect to Convex mutations with offline queue
+- [ ] Test validation edge cases
 
 ### Phase 6: Playing Phase 🃏
 - [ ] Build hands won tracking UI
@@ -369,19 +393,21 @@ completeRound({
 - [ ] Add round history view
 
 ### Phase 7: Game Management 📋
-- [ ] Build main game screen with scorecard
-- [ ] Implement round navigation
-- [ ] Add edit previous round feature
-- [ ] Game completion detection
-- [ ] Winner announcement
-- [ ] New game flow
-- [ ] Game history list screen
+- [ ] Implement mode switching (calling → playing → scorecard)
+- [ ] Add edit previous round feature (with confirmation)
+- [ ] Build round navigation UI
+- [ ] Game completion detection (after round 13)
+- [ ] Winner announcement screen
+- [ ] New game flow (replace current game)
+- [ ] Game history list screen (nice-to-have)
 
 ### Phase 8: Polish & Optimization ✨
 - [ ] Add animations and transitions
 - [ ] Optimize performance (memoization, lazy loading)
-- [ ] Add offline support (Convex sync)
-- [ ] Improve error handling
+- [ ] Test offline support (airplane mode scenarios)
+- [ ] Implement conflict resolution for sync
+- [ ] Add offline indicator in UI
+- [ ] Improve error handling and retry logic
 - [ ] Add loading skeletons
 - [ ] Haptic feedback (mobile)
 - [ ] Sound effects (optional)
@@ -426,9 +452,20 @@ completeRound({
 
 ### State Management Strategy
 - **Server state**: Convex queries (automatic caching)
+- **Local persistence**: React Native MMKV (fast, synchronous)
+- **Offline queue**: MMKV-stored mutations synced when online
 - **UI state**: React useState/useReducer
 - **Navigation state**: Expo Router
-- **No Redux/MobX needed** - Convex handles most state
+- **No Redux/MobX needed** - Convex + MMKV handle most state
+
+### Why MMKV?
+- **Ultra fast**: Up to 30x faster than AsyncStorage
+- **Synchronous API**: No async/await needed for simple reads/writes
+- **Small footprint**: ~30KB bundle size
+- **Cross-platform**: Works on iOS, Android, and Web (with polyfill)
+- **Type-safe**: Great TypeScript support
+- **Reliable**: Used by production apps with millions of users
+- **Perfect for offline-first**: Instant reads/writes for game state
 
 ---
 
@@ -531,11 +568,54 @@ The scoring table is based on the rule: `points = call * 5 + 5`
 
 ### Game Rules Summary
 1. Deal increases each round (1 card → 13 cards)
-2. Trump determined by next card after dealing
+2. Trump determined by next card after dealing (not tracked in app)
 3. Players call starting clockwise from dealer
-4. Total calls ≠ cards in hand (enforced on dealer)
+4. **Critical validation**: Total calls ≠ cards in hand (enforced on dealer)
 5. Points awarded only if actual hands = called hands
 6. Game ends after 13 rounds
+7. Scorer tracks calls and results only (trump handled during physical gameplay)
+
+---
+
+## 🔄 Offline-First Architecture
+
+### How It Works
+
+**Write Flow (User makes changes):**
+1. User action (e.g., sets player call) → Update MMKV immediately
+2. Queue mutation in MMKV offline queue
+3. If online: Send to Convex, remove from queue on success
+4. If offline: Keep in queue, show "offline" indicator
+5. When connection restored: Process queue in order
+
+**Read Flow (Display data):**
+1. Primary source: MMKV (instant, synchronous)
+2. Subscribe to Convex for real-time updates
+3. When Convex data arrives: Update MMKV, re-render UI
+4. Conflict resolution: Last-write-wins (or custom logic)
+
+**Benefits:**
+- ⚡ Instant UI updates (no loading states)
+- 🔌 Works completely offline
+- 🔄 Auto-sync when online
+- 💾 Data never lost (persisted locally)
+- 🎮 Perfect for games (low latency critical)
+
+**MMKV Storage Keys:**
+```typescript
+// Current active game
+mmkv.set('current_game', JSON.stringify(game))
+
+// Offline mutation queue
+mmkv.set('offline_queue', JSON.stringify([
+  { type: 'createGame', data: {...} },
+  { type: 'setPlayerCall', data: {...} },
+]))
+
+// User preferences
+mmkv.set('theme', 'dark')
+mmkv.set('onboarding_completed', true)
+```
 
 ---
 
@@ -547,62 +627,92 @@ The scoring table is based on the rule: `points = call * 5 + 5`
 - ✅ All validation rules enforced correctly
 - ✅ Scoring calculated accurately
 - ✅ Scorecard displays correctly on all platforms
-- ✅ Data persists in Convex
+- ✅ Data persists locally (MMKV) and syncs to Convex
+- ✅ Works completely offline with sync when online
+- ✅ Dark mode toggle works across all screens
 - ✅ App works on iOS, Android, and Web
 - ✅ No major bugs or crashes
 - ✅ Responsive UI on different screen sizes
 
 ---
 
-## 🤔 Open Questions for Discussion
+## ✅ Design Decisions
 
-1. **Trump Card Display**: Should trump be:
-   - Manually entered by scorer?
-   - Randomly generated (simulated)?
-   - Not tracked at all (just for players' reference)?
+### 1. Trump Card
+**Decision**: Not tracked in app
+- Players handle trump during physical gameplay
+- Keeps app focused on score keeping
+- Reduces data entry burden on scorer
 
-2. **Round Flow**: Should we have separate screens for:
-   - Calling phase vs playing phase?
-   - Or keep everything on one screen with conditional rendering?
+### 2. UI Flow
+**Decision**: Single screen with mode switching
+- More compact and efficient
+- Reduces navigation complexity
+- Three modes: Calling → Playing → Scorecard
+- Smooth transitions between modes
 
-3. **Edit History**: Should users be able to:
-   - Edit any previous round freely?
-   - Only edit the most recent round?
-   - Require confirmation before editing?
+### 3. Edit History
+**Decision**: Edit any round with confirmation dialog
+- Maximum flexibility to fix mistakes
+- Confirmation prevents accidental edits
+- Recalculates totals automatically
+- Shows warning when editing past rounds
 
-4. **Offline Support**:
-   - How important is offline functionality?
-   - Should games auto-save locally and sync later?
+### 4. MVP Features
+**Included in MVP:**
+- ✅ Dark mode support (toggle in settings)
+- ✅ Single active game at a time
+- ✅ Full game flow (setup → 13 rounds → completion)
 
-5. **Onboarding**:
-   - Include in-app tutorial?
-   - Just link to rules?
-   - Assume users know how to play?
+**Nice-to-have (Post-MVP):**
+- 📋 Game history/archive
+- 📤 Export scorecard as PDF/image
+- 👥 Multiple simultaneous games
 
-6. **Multiple Games**:
-   - Can user have multiple active games?
-   - Archive/delete old games?
-   - How to handle game list UI?
+### 5. Offline Support
+**Decision**: Full offline-first architecture
+- React Native MMKV for local storage
+- Offline mutation queue
+- Auto-sync when connection restored
+- Works completely offline during gameplay
+- Critical for locations with poor connectivity
 
-7. **Theme/Branding**:
-   - Specific color scheme preference?
-   - Logo/icon ideas?
-   - Any cultural design elements for Rung?
+### 6. Onboarding
+**Decision**: Minimal onboarding (to be determined)
+- Assume users know how to play Rung
+- Brief tooltip tour on first launch
+- Help/rules accessible from settings
+- Focus on intuitive UI over tutorials
 
 ---
 
 ## 🎬 Next Steps
 
-After plan approval:
-1. Initialize Expo project with TypeScript and Router
-2. Set up Tamagui theme configuration
-3. Initialize Convex backend with schema
-4. Create basic navigation structure
-5. Build and test one complete flow (e.g., game setup)
-6. Iterate based on feedback
+Ready to begin implementation! Here's the kickoff sequence:
+
+### Immediate (Phase 1):
+1. Initialize Expo project with Router and TypeScript
+2. Install dependencies: Tamagui, Convex, MMKV
+3. Set up project structure (app/, components/, convex/, lib/)
+4. Configure Tamagui with dark/light themes
+5. Set up Convex backend and MMKV storage
+6. Create basic navigation shell
+
+### First Feature (Phase 2-4):
+7. Build game setup flow (test offline-first pattern)
+8. Create Convex schema and mutations
+9. Test MMKV → Convex sync pipeline
+10. Deploy to Expo Go for testing
+
+### Iteration:
+- Build calling phase
+- Build playing phase
+- Add scorecard view
+- Polish and test on all platforms
 
 ---
 
 **Last Updated**: 2026-01-19
-**Status**: 📋 Planning Phase
-**Ready for Review**: ✅ Yes
+**Status**: ✅ Plan Approved - Ready for Implementation
+**Tech Stack**: Expo Router + Tamagui + Convex + MMKV
+**Key Decisions**: Single-screen UI, offline-first, dark mode, no trump tracking
