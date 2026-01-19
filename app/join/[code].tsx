@@ -209,66 +209,54 @@ function LocalJoinGame({ code, colors }: { code: string; colors: any }) {
 function ConvexJoinGame({ code, colors }: { code: string; colors: any }) {
   const styles = createStyles(colors);
   const router = useRouter();
-  
+
   // Dynamic imports for Convex - only used when configured
   const { useQuery, useMutation } = require('convex/react');
   const { api } = require('../../convex/_generated/api');
-  
-  const [selectedPlayer, setSelectedPlayer] = useState<any>(null);
-  const [joining, setJoining] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedCall, setSelectedCall] = useState<number | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
+
+  const [playerName, setPlayerName] = React.useState('');
+  const [selectedEmoji, setSelectedEmoji] = React.useState('😊');
+  const [showEmojiPicker, setShowEmojiPicker] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [joining, setJoining] = React.useState(false);
+  const [joined, setJoined] = React.useState(false);
+
+  const PLAYER_EMOJIS = [
+    '😊', '😎', '🤓', '🥳', '😈', '👻', '🤖', '👽',
+    '🦊', '🐱', '🐶', '🐸', '🦁', '🐯', '🐻', '🐼',
+    '🌟', '⚡', '🔥', '💎', '🎯', '🎲', '🃏', '👑',
+    '🚀', '🎸', '🎮', '⚽', '🏀', '🎱', '🌈', '🍀',
+  ];
 
   // Get game by join code
-  const game = useQuery(api.games.getGameByJoinCode, { 
-    joinCode: code?.toUpperCase() || '' 
+  const game = useQuery(api.games.getGameByJoinCode, {
+    joinCode: code?.toUpperCase() || ''
   });
 
-  const joinGame = useMutation(api.games.joinGame);
-  const submitCall = useMutation(api.rounds.submitPlayerCall);
+  const joinLobby = useMutation(api.games.joinLobby);
 
-  // Get current round data for player
-  const roundData = useQuery(
-    api.rounds.getCurrentRoundForPlayer, 
-    selectedPlayer ? { gameId: game?._id, playerId: selectedPlayer.id } : 'skip'
-  );
-
-  const handlePlayerSelect = async (player: any) => {
-    setJoining(true);
+  const handleJoinGame = async () => {
     setError(null);
-    
+
+    if (!playerName.trim()) {
+      setError('Please enter your name');
+      return;
+    }
+
+    setJoining(true);
+
     try {
-      await joinGame({
+      await joinLobby({
         joinCode: code?.toUpperCase() || '',
-        playerId: player.id,
+        playerName: playerName.trim(),
+        playerEmoji: selectedEmoji,
         deviceId: `web_${Date.now()}`,
       });
-      setSelectedPlayer(player);
+      setJoined(true);
     } catch (err: any) {
       setError(err.message || 'Failed to join game');
     } finally {
       setJoining(false);
-    }
-  };
-
-  const handleSubmitCall = async () => {
-    if (selectedCall === null || !game || !roundData?.round) return;
-    
-    setSubmitting(true);
-    try {
-      await submitCall({
-        gameId: game._id,
-        roundNumber: roundData.round.roundNumber,
-        playerId: selectedPlayer.id,
-        call: selectedCall,
-      });
-      setSubmitted(true);
-    } catch (err: any) {
-      alert(err.message || 'Failed to submit call');
-    } finally {
-      setSubmitting(false);
     }
   };
 
@@ -300,22 +288,6 @@ function ConvexJoinGame({ code, colors }: { code: string; colors: any }) {
     );
   }
 
-  // Error state
-  if (error) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.card}>
-          <Text style={styles.emoji}>⚠️</Text>
-          <Text style={styles.title}>Error</Text>
-          <Text style={styles.subtitle}>{error}</Text>
-          <Pressable style={styles.retryButton} onPress={() => setError(null)}>
-            <Text style={styles.retryButtonText}>Try Again</Text>
-          </Pressable>
-        </View>
-      </View>
-    );
-  }
-
   // Joining state
   if (joining) {
     return (
@@ -326,169 +298,127 @@ function ConvexJoinGame({ code, colors }: { code: string; colors: any }) {
     );
   }
 
-  // Player selection
-  if (!selectedPlayer) {
+  // Success screen
+  if (joined) {
     return (
       <View style={styles.container}>
-        <View style={styles.card}>
-          <Text style={styles.title}>Select Your Name</Text>
-          <Text style={styles.subtitle}>Who are you?</Text>
-
-          <View style={styles.playerList}>
-            {game.players.map((player: any) => (
-              <Pressable
-                key={player.id}
-                style={styles.playerOption}
-                onPress={() => handlePlayerSelect(player)}
-              >
-                <Text style={styles.playerOptionEmoji}>{player.emoji || '👤'}</Text>
-                <Text style={styles.playerOptionName}>{player.name}</Text>
-              </Pressable>
-            ))}
-          </View>
-        </View>
-      </View>
-    );
-  }
-
-  // Loading round data
-  if (!roundData) {
-    return (
-      <View style={styles.container}>
-        <ActivityIndicator size="large" color={colors.accent} />
-        <Text style={styles.loadingText}>Loading game...</Text>
-      </View>
-    );
-  }
-
-  const { round, playerRound, allCalls } = roundData;
-
-  // Waiting for round to start
-  if (!round) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.card}>
-          <Text style={styles.emoji}>⏳</Text>
-          <Text style={styles.title}>Waiting for Round</Text>
-          <Text style={styles.subtitle}>
-            The scorekeeper hasn't started the round yet.
-          </Text>
-        </View>
-      </View>
-    );
-  }
-
-  // Not in calling phase
-  if (round.status !== 'calling') {
-    return (
-      <View style={styles.container}>
-        <View style={styles.card}>
-          <Text style={styles.emoji}>🎮</Text>
-          <Text style={styles.title}>Round {round.roundNumber}</Text>
-          <Text style={styles.subtitle}>
-            {round.status === 'playing' 
-              ? 'Playing phase - check with the scorekeeper'
-              : 'Round complete - waiting for next round'
-            }
-          </Text>
-          
-          {playerRound && (
-            <View style={styles.resultBox}>
-              <Text style={styles.resultLabel}>Your Call</Text>
-              <Text style={styles.resultNumber}>{playerRound.call}</Text>
-            </View>
-          )}
-        </View>
-      </View>
-    );
-  }
-
-  // Check if player already called
-  const hasCalled = playerRound?.hasCalled || submitted;
-
-  return (
-    <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.content}>
-      <View style={styles.header}>
-        <Text style={styles.playerEmoji}>{selectedPlayer.emoji || '👤'}</Text>
-        <Text style={styles.welcomeText}>Hi, {selectedPlayer.name}!</Text>
-      </View>
-
-      <View style={styles.roundCard}>
-        <Text style={styles.roundLabel}>Round {round.roundNumber}</Text>
-        {round.trumpCard && (
-          <View style={styles.trumpInfo}>
-            <Text style={styles.trumpLabel}>Trump</Text>
-            <Text style={styles.trumpCard}>{round.trumpCard.displayText}</Text>
-          </View>
-        )}
-      </View>
-
-      {hasCalled ? (
         <View style={styles.card}>
           <Text style={styles.emoji}>✅</Text>
-          <Text style={styles.title}>Call Submitted!</Text>
+          <Text style={styles.title}>You're In!</Text>
           <Text style={styles.subtitle}>
-            You called {playerRound?.call ?? selectedCall}. 
-            Waiting for other players...
+            You've joined as {selectedEmoji} {playerName}{'\n\n'}
+            Wait for the host to start the game
           </Text>
-          
-          <View style={styles.callsList}>
-            {allCalls?.map((p: any) => (
-              <View key={p.playerId} style={styles.callRow}>
-                <Text style={styles.callEmoji}>{p.playerEmoji || '👤'}</Text>
-                <Text style={styles.callName}>{p.playerName}</Text>
-                <Text style={[
-                  styles.callStatus,
-                  p.hasCalled ? styles.callStatusDone : styles.callStatusWaiting
-                ]}>
-                  {p.hasCalled ? `Called ${p.call}` : 'Waiting...'}
-                </Text>
-              </View>
-            ))}
-          </View>
         </View>
-      ) : (
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Enter Your Call</Text>
-          <Text style={styles.sectionSubtitle}>
-            How many hands do you think you'll win?
-          </Text>
+      </View>
+    );
+  }
 
-          <View style={styles.callGrid}>
-            {Array.from({ length: round.roundNumber + 1 }, (_, i) => i).map(num => (
-              <Pressable
-                key={num}
-                style={[
-                  styles.callOption,
-                  selectedCall === num && styles.callOptionSelected,
-                ]}
-                onPress={() => setSelectedCall(num)}
-              >
-                <Text style={[
-                  styles.callOptionText,
-                  selectedCall === num && styles.callOptionTextSelected,
-                ]}>
-                  {num}
-                </Text>
-              </Pressable>
-            ))}
+  return (
+    <>
+      <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.content}>
+        <View style={styles.header}>
+          <Text style={styles.welcomeText}>Join Game</Text>
+          <Text style={styles.subtitle}>Code: {code}</Text>
+        </View>
+
+        {error && (
+          <View style={[styles.card, { backgroundColor: colors.error + '20', borderWidth: 1, borderColor: colors.error }]}>
+            <Text style={[styles.subtitle, { color: colors.error }]}>{error}</Text>
           </View>
+        )}
 
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Choose Your Emoji</Text>
           <Pressable
-            style={[
-              styles.submitButton,
-              (selectedCall === null || submitting) && styles.submitButtonDisabled,
-            ]}
-            onPress={handleSubmitCall}
-            disabled={selectedCall === null || submitting}
+            style={[styles.playerOption, { justifyContent: 'center', minHeight: 80 }]}
+            onPress={() => setShowEmojiPicker(true)}
           >
-            <Text style={styles.submitButtonText}>
-              {submitting ? 'Submitting...' : 'Submit Call'}
-            </Text>
+            <Text style={styles.playerOptionEmoji}>{selectedEmoji}</Text>
           </Pressable>
         </View>
-      )}
-    </ScrollView>
+
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Enter Your Name</Text>
+          <TextInput
+            value={playerName}
+            onChangeText={setPlayerName}
+            placeholder="Your name"
+            placeholderTextColor={colors.textMuted}
+            style={[styles.playerOption, {
+              paddingVertical: 16,
+              fontSize: 18,
+              textAlign: 'center',
+              color: colors.text,
+            }]}
+            autoCapitalize="words"
+            autoFocus
+            returnKeyType="done"
+            onSubmitEditing={handleJoinGame}
+          />
+        </View>
+
+        <Pressable
+          style={[styles.submitButton, !playerName.trim() && styles.submitButtonDisabled]}
+          onPress={handleJoinGame}
+          disabled={!playerName.trim()}
+        >
+          <Text style={styles.submitButtonText}>Join Game</Text>
+        </Pressable>
+      </ScrollView>
+
+      <Modal
+        visible={showEmojiPicker}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowEmojiPicker(false)}
+      >
+        <Pressable
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(0,0,0,0.5)',
+            justifyContent: 'center',
+            alignItems: 'center',
+            padding: 20,
+          }}
+          onPress={() => setShowEmojiPicker(false)}
+        >
+          <View style={{
+            backgroundColor: colors.card,
+            borderRadius: 20,
+            padding: 20,
+            width: '100%',
+            maxWidth: 400,
+            maxHeight: '80%',
+          }}>
+            <Text style={[styles.sectionTitle, { textAlign: 'center', marginBottom: 16 }]}>
+              Choose an emoji
+            </Text>
+            <ScrollView contentContainerStyle={{
+              flexDirection: 'row',
+              flexWrap: 'wrap',
+              justifyContent: 'center',
+            }}>
+              {PLAYER_EMOJIS.map((emoji) => (
+                <Pressable
+                  key={emoji}
+                  style={[
+                    styles.callOption,
+                    selectedEmoji === emoji && styles.callOptionSelected,
+                  ]}
+                  onPress={() => {
+                    setSelectedEmoji(emoji);
+                    setShowEmojiPicker(false);
+                  }}
+                >
+                  <Text style={{ fontSize: 32 }}>{emoji}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        </Pressable>
+      </Modal>
+    </>
   );
 }
 
