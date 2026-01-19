@@ -1,31 +1,207 @@
-import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator, TextInput, Modal } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTheme } from '../../lib/theme';
 import { isConvexConfigured } from '../../lib/convex';
 
-// Fallback component when Convex is not configured
-function ConvexNotConfigured({ colors }: { colors: any }) {
+// Local storage join flow (when Convex is not configured)
+function LocalJoinGame({ code, colors }: { code: string; colors: any }) {
   const styles = createStyles(colors);
   const router = useRouter();
-  
-  return (
-    <View style={styles.container}>
-      <View style={styles.card}>
-        <Text style={styles.emoji}>⚙️</Text>
-        <Text style={styles.title}>Setup Required</Text>
-        <Text style={styles.subtitle}>
-          QR code sync requires Convex to be configured.{'\n\n'}
-          To enable this feature:{'\n'}
-          1. Run: npx convex dev{'\n'}
-          2. Set EXPO_PUBLIC_CONVEX_URL in your environment{'\n'}
-          3. Restart the app
-        </Text>
-        <Pressable style={styles.retryButton} onPress={() => router.push('/')}>
-          <Text style={styles.retryButtonText}>Go Home</Text>
-        </Pressable>
+  const { storageHelpers, StorageKeys } = require('../../lib/mmkv');
+
+  const [playerName, setPlayerName] = React.useState('');
+  const [selectedEmoji, setSelectedEmoji] = React.useState('😊');
+  const [showEmojiPicker, setShowEmojiPicker] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [joined, setJoined] = React.useState(false);
+
+  const PLAYER_EMOJIS = [
+    '😊', '😎', '🤓', '🥳', '😈', '👻', '🤖', '👽',
+    '🦊', '🐱', '🐶', '🐸', '🦁', '🐯', '🐻', '🐼',
+    '🌟', '⚡', '🔥', '💎', '🎯', '🎲', '🃏', '👑',
+    '🚀', '🎸', '🎮', '⚽', '🏀', '🎱', '🌈', '🍀',
+  ];
+
+  const handleJoinGame = () => {
+    setError(null);
+
+    if (!playerName.trim()) {
+      setError('Please enter your name');
+      return;
+    }
+
+    const game = storageHelpers.getObject(StorageKeys.CURRENT_GAME);
+
+    if (!game) {
+      setError('Game not found');
+      return;
+    }
+
+    if (game.joinCode !== code?.toUpperCase()) {
+      setError('Invalid join code');
+      return;
+    }
+
+    if (game.status !== 'lobby') {
+      setError('Game has already started');
+      return;
+    }
+
+    if (game.players.length >= game.numberOfPlayers) {
+      setError('Game is full');
+      return;
+    }
+
+    if (game.players.some((p: any) => p.name.toLowerCase() === playerName.trim().toLowerCase())) {
+      setError('Name is already taken');
+      return;
+    }
+
+    const newPlayer = {
+      id: `player_${Date.now()}_${game.players.length}`,
+      name: playerName.trim(),
+      position: game.players.length,
+      emoji: selectedEmoji,
+    };
+
+    const updatedGame = {
+      ...game,
+      players: [...game.players, newPlayer],
+      playerSessions: [
+        ...(game.playerSessions || []),
+        {
+          playerId: newPlayer.id,
+          joinedAt: Date.now(),
+          deviceId: `web_${Date.now()}`,
+        },
+      ],
+    };
+
+    storageHelpers.setObject(StorageKeys.CURRENT_GAME, updatedGame);
+    setJoined(true);
+  };
+
+  if (joined) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.card}>
+          <Text style={styles.emoji}>✅</Text>
+          <Text style={styles.title}>You're In!</Text>
+          <Text style={styles.subtitle}>
+            You've joined as {selectedEmoji} {playerName}{'\n\n'}
+            Wait for the host to start the game
+          </Text>
+        </View>
       </View>
-    </View>
+    );
+  }
+
+  return (
+    <>
+      <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.content}>
+        <View style={styles.header}>
+          <Text style={styles.welcomeText}>Join Game</Text>
+          <Text style={styles.subtitle}>Code: {code}</Text>
+        </View>
+
+        {error && (
+          <View style={[styles.card, { backgroundColor: colors.error + '20', borderWidth: 1, borderColor: colors.error }]}>
+            <Text style={[styles.subtitle, { color: colors.error }]}>{error}</Text>
+          </View>
+        )}
+
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Choose Your Emoji</Text>
+          <Pressable
+            style={[styles.playerOption, { justifyContent: 'center', minHeight: 80 }]}
+            onPress={() => setShowEmojiPicker(true)}
+          >
+            <Text style={styles.playerOptionEmoji}>{selectedEmoji}</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Enter Your Name</Text>
+          <TextInput
+            value={playerName}
+            onChangeText={setPlayerName}
+            placeholder="Your name"
+            placeholderTextColor={colors.textMuted}
+            style={[styles.playerOption, {
+              paddingVertical: 16,
+              fontSize: 18,
+              textAlign: 'center',
+              color: colors.text,
+            }]}
+            autoCapitalize="words"
+            autoFocus
+            returnKeyType="done"
+            onSubmitEditing={handleJoinGame}
+          />
+        </View>
+
+        <Pressable
+          style={[styles.submitButton, !playerName.trim() && styles.submitButtonDisabled]}
+          onPress={handleJoinGame}
+          disabled={!playerName.trim()}
+        >
+          <Text style={styles.submitButtonText}>Join Game</Text>
+        </Pressable>
+      </ScrollView>
+
+      <Modal
+        visible={showEmojiPicker}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowEmojiPicker(false)}
+      >
+        <Pressable
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(0,0,0,0.5)',
+            justifyContent: 'center',
+            alignItems: 'center',
+            padding: 20,
+          }}
+          onPress={() => setShowEmojiPicker(false)}
+        >
+          <View style={{
+            backgroundColor: colors.card,
+            borderRadius: 20,
+            padding: 20,
+            width: '100%',
+            maxWidth: 400,
+            maxHeight: '80%',
+          }}>
+            <Text style={[styles.sectionTitle, { textAlign: 'center', marginBottom: 16 }]}>
+              Choose an emoji
+            </Text>
+            <ScrollView contentContainerStyle={{
+              flexDirection: 'row',
+              flexWrap: 'wrap',
+              justifyContent: 'center',
+            }}>
+              {PLAYER_EMOJIS.map((emoji) => (
+                <Pressable
+                  key={emoji}
+                  style={[
+                    styles.callOption,
+                    selectedEmoji === emoji && styles.callOptionSelected,
+                  ]}
+                  onPress={() => {
+                    setSelectedEmoji(emoji);
+                    setShowEmojiPicker(false);
+                  }}
+                >
+                  <Text style={{ fontSize: 32 }}>{emoji}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        </Pressable>
+      </Modal>
+    </>
   );
 }
 
@@ -320,9 +496,9 @@ export default function JoinGame() {
   const { code } = useLocalSearchParams<{ code: string }>();
   const { colors } = useTheme();
 
-  // Check if Convex is configured
+  // Use local storage join flow when Convex is not configured
   if (!isConvexConfigured()) {
-    return <ConvexNotConfigured colors={colors} />;
+    return <LocalJoinGame code={code || ''} colors={colors} />;
   }
 
   return <ConvexJoinGame code={code || ''} colors={colors} />;

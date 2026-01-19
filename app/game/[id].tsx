@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { LobbyMode } from '../../components/game/LobbyMode';
 import { CallingMode } from '../../components/game/CallingMode';
 import { PlayingMode } from '../../components/game/PlayingMode';
 import { ScorecardMode } from '../../components/game/ScorecardMode';
@@ -8,7 +9,7 @@ import { storageHelpers, StorageKeys } from '../../lib/mmkv';
 import { TrumpCard as TrumpCardType } from '../../utils/trump';
 import { useTheme } from '../../lib/theme';
 
-type GameMode = 'calling' | 'playing' | 'scorecard';
+type GameMode = 'lobby' | 'calling' | 'playing' | 'scorecard';
 
 interface Player {
   id: string;
@@ -63,23 +64,28 @@ export default function Game() {
 
   useEffect(() => {
     const savedGame = storageHelpers.getObject<Game>(StorageKeys.CURRENT_GAME);
-    
+
     if (savedGame) {
       setGame(savedGame);
 
-      const rounds = savedGame.rounds || [];
-      const currentRoundData = rounds.find(r => r.roundNumber === savedGame.currentRound);
-
-      if (!currentRoundData) {
-        setMode('calling');
-      } else if (currentRoundData.status === 'calling') {
-        setMode('calling');
-      } else if (currentRoundData.status === 'playing') {
-        setMode('playing');
+      // Check if we're in lobby mode
+      if (savedGame.status === 'lobby') {
+        setMode('lobby');
       } else {
-        setMode('scorecard');
+        const rounds = savedGame.rounds || [];
+        const currentRoundData = rounds.find(r => r.roundNumber === savedGame.currentRound);
+
+        if (!currentRoundData) {
+          setMode('calling');
+        } else if (currentRoundData.status === 'calling') {
+          setMode('calling');
+        } else if (currentRoundData.status === 'playing') {
+          setMode('playing');
+        } else {
+          setMode('scorecard');
+        }
       }
-      
+
       if (savedGame.id !== id) {
         router.replace(`/game/${savedGame.id}`);
       }
@@ -92,6 +98,20 @@ export default function Game() {
   const saveGame = (updatedGame: Game) => {
     setGame(updatedGame);
     storageHelpers.setObject(StorageKeys.CURRENT_GAME, updatedGame);
+  };
+
+  const handleLobbyStart = (dealerIndex: number) => {
+    if (!game) return;
+
+    // Update game status and dealer, then move to calling mode
+    const updatedGame = {
+      ...game,
+      dealerIndex,
+      status: 'in_progress',
+    };
+
+    saveGame(updatedGame);
+    setMode('calling');
   };
 
   const handleCallingComplete = (
@@ -183,6 +203,15 @@ export default function Game() {
 
   return (
     <View style={styles.gameContainer}>
+      {mode === 'lobby' && game.joinCode && (
+        <LobbyMode
+          joinCode={game.joinCode}
+          numberOfPlayers={game.numberOfPlayers}
+          players={game.players}
+          onStartGame={handleLobbyStart}
+        />
+      )}
+
       {mode === 'calling' && (
         <CallingMode
           players={game.players}
