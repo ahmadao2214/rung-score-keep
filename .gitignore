@@ -40,5 +40,5 @@ yarn-error.*
 /ios
 /android
 
-# Convex
-convex/_generated/
+# Convex - Note: stub files are committed for deployment
+# Real generated files should be created when running `npx convex dev` locally
