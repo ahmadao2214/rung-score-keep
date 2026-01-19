@@ -43,6 +43,12 @@ interface Game {
   status: string;
   createdAt: number;
   rounds?: Round[];
+  joinCode?: string;
+  playerSessions?: {
+    playerId: string;
+    joinedAt: number;
+    deviceId?: string;
+  }[];
 }
 
 export default function Game() {
@@ -183,6 +189,8 @@ export default function Game() {
           dealerIndex={game.dealerIndex}
           roundNumber={game.currentRound}
           numberOfPlayers={game.numberOfPlayers}
+          joinCode={game.joinCode}
+          joinedPlayerCount={game.playerSessions?.length || 0}
           onComplete={handleCallingComplete}
         />
       )}

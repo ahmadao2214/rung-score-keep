@@ -14,6 +14,16 @@ const PLAYER_EMOJIS = [
 
 const DEFAULT_EMOJIS = ['😊', '😎', '🤓', '🥳', '😈', '👻', '🤖', '👽'];
 
+// Generate a random 4-character uppercase join code
+function generateJoinCode(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Exclude confusing chars I, O, 0, 1
+  let code = '';
+  for (let i = 0; i < 4; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+}
+
 export default function NewGame() {
   const router = useRouter();
   const { colors } = useTheme();
@@ -84,6 +94,8 @@ export default function NewGame() {
       currentRound: 1,
       status: 'in_progress',
       createdAt: Date.now(),
+      joinCode: generateJoinCode(),
+      playerSessions: [],
     };
 
     storageHelpers.setObject(StorageKeys.CURRENT_GAME, game);
