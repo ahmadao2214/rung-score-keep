@@ -1,4 +1,5 @@
-import { styled, Input as TamaguiInput } from '@tamagui/core';
+import { styled } from '@tamagui/core';
+import { Input as TamaguiInput } from 'tamagui';
 
 /**
  * Text input component with app-specific styling

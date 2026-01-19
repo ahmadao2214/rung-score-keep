@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { YStack } from '@tamagui/core';
 import { CallingMode } from '../../components/game/CallingMode';
 import { PlayingMode } from '../../components/game/PlayingMode';
 import { ScorecardMode } from '../../components/game/ScorecardMode';
 import { storageHelpers, StorageKeys } from '../../lib/mmkv';
 import { TrumpCard as TrumpCardType } from '../../utils/trump';
+import { useTheme } from '../../lib/theme';
 
 type GameMode = 'calling' | 'playing' | 'scorecard';
 
@@ -14,11 +14,13 @@ interface Player {
   id: string;
   name: string;
   position: number;
+  emoji?: string;
 }
 
 interface PlayerRound {
   playerId: string;
   playerName: string;
+  playerEmoji: string;
   call: number;
   handsWon: number;
   points: number;
@@ -46,17 +48,19 @@ interface Game {
 export default function Game() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const { colors } = useTheme();
   const [game, setGame] = useState<Game | null>(null);
   const [mode, setMode] = useState<GameMode>('calling');
   const [loading, setLoading] = useState(true);
 
+  const styles = createStyles(colors);
+
   useEffect(() => {
-    // Load game from MMKV
     const savedGame = storageHelpers.getObject<Game>(StorageKeys.CURRENT_GAME);
-    if (savedGame && savedGame.id === id) {
+    
+    if (savedGame) {
       setGame(savedGame);
 
-      // Determine initial mode based on current round status
       const rounds = savedGame.rounds || [];
       const currentRoundData = rounds.find(r => r.roundNumber === savedGame.currentRound);
 
@@ -69,9 +73,15 @@ export default function Game() {
       } else {
         setMode('scorecard');
       }
+      
+      if (savedGame.id !== id) {
+        router.replace(`/game/${savedGame.id}`);
+      }
+    } else {
+      router.replace('/');
     }
     setLoading(false);
-  }, [id]);
+  }, [id, router]);
 
   const saveGame = (updatedGame: Game) => {
     setGame(updatedGame);
@@ -89,6 +99,7 @@ export default function Game() {
       return {
         playerId: player.id,
         playerName: player.name,
+        playerEmoji: player.emoji || '👤',
         call,
         handsWon: 0,
         points: 0,
@@ -148,7 +159,7 @@ export default function Game() {
   if (loading) {
     return (
       <View style={styles.container}>
-        <Text>Loading...</Text>
+        <Text style={styles.loadingText}>Loading...</Text>
       </View>
     );
   }
@@ -156,7 +167,7 @@ export default function Game() {
   if (!game) {
     return (
       <View style={styles.container}>
-        <Text>Game not found</Text>
+        <Text style={styles.loadingText}>Game not found</Text>
       </View>
     );
   }
@@ -165,7 +176,7 @@ export default function Game() {
   const currentRoundData = rounds.find(r => r.roundNumber === game.currentRound);
 
   return (
-    <YStack flex={1} backgroundColor="$background">
+    <View style={styles.gameContainer}>
       {mode === 'calling' && (
         <CallingMode
           players={game.players}
@@ -193,15 +204,23 @@ export default function Game() {
           onEndGame={handleEndGame}
         />
       )}
-    </YStack>
+    </View>
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: any) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.background,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  gameContainer: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: colors.textMuted,
   },
 });

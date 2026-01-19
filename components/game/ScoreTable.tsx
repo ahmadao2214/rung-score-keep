@@ -1,11 +1,11 @@
-import { ScrollView } from 'react-native';
-import { Text, YStack, XStack } from '@tamagui/core';
-import { Card } from '../ui/Card';
+import { ScrollView, View, Text, StyleSheet } from 'react-native';
+import { useTheme } from '../../lib/theme';
 
 interface PlayerScore {
+  playerId: string;
   playerName: string;
-  calls: number[];
-  points: number[];
+  emoji: string;
+  roundData: { call: number; points: number }[];
   totalPoints: number;
 }
 
@@ -14,88 +14,160 @@ interface ScoreTableProps {
   currentRound: number;
 }
 
-/**
- * Full game scorecard table showing all rounds
- */
 export function ScoreTable({ playerScores, currentRound }: ScoreTableProps) {
+  const { colors } = useTheme();
+  const styles = createStyles(colors);
   const rounds = Array.from({ length: currentRound }, (_, i) => i + 1);
 
   return (
-    <Card padding="small">
+    <View style={styles.container}>
       <ScrollView horizontal showsHorizontalScrollIndicator={true}>
-        <YStack gap={0}>
-          {/* Header Row */}
-          <XStack borderBottomWidth={2} borderColor="$borderColor" paddingBottom={8}>
-            <YStack width={100} paddingHorizontal={8}>
-              <Text fontSize={14} fontWeight="bold">
-                Player
-              </Text>
-            </YStack>
-
+        <View>
+          <View style={styles.headerRow}>
+            <View style={styles.playerCell}>
+              <Text style={styles.headerText}>Player</Text>
+            </View>
             {rounds.map((round) => (
-              <YStack key={round} width={60} alignItems="center">
-                <Text fontSize={12} fontWeight="bold">
-                  R{round}
-                </Text>
-              </YStack>
+              <View key={round} style={styles.roundCell}>
+                <Text style={styles.headerText}>R{round}</Text>
+              </View>
             ))}
+            <View style={styles.totalCell}>
+              <Text style={styles.headerText}>Total</Text>
+            </View>
+          </View>
 
-            <YStack width={80} alignItems="center">
-              <Text fontSize={14} fontWeight="bold">
-                Total
-              </Text>
-            </YStack>
-          </XStack>
-
-          {/* Player Rows */}
           {playerScores.map((player, index) => (
-            <XStack
-              key={player.playerName}
-              backgroundColor={index % 2 === 0 ? '$background' : '$backgroundStrong'}
-              paddingVertical={12}
-              borderBottomWidth={1}
-              borderColor="$borderColor"
+            <View
+              key={player.playerId}
+              style={[
+                styles.dataRow,
+                index % 2 === 0 ? styles.rowEven : styles.rowOdd,
+              ]}
             >
-              <YStack width={100} paddingHorizontal={8} justifyContent="center">
-                <Text fontSize={14} fontWeight="600" numberOfLines={1}>
+              <View style={styles.playerCell}>
+                <Text style={styles.emoji}>{player.emoji}</Text>
+                <Text style={styles.playerName} numberOfLines={1}>
                   {player.playerName}
                 </Text>
-              </YStack>
+              </View>
 
               {rounds.map((round, roundIndex) => {
-                const call = player.calls[roundIndex] ?? '-';
-                const points = player.points[roundIndex] ?? 0;
-                const hasData = player.calls[roundIndex] !== undefined;
+                const data = player.roundData[roundIndex];
+                const hasData = data !== undefined;
+                const madeCall = hasData && data.points > 0;
 
                 return (
-                  <YStack key={round} width={60} alignItems="center" justifyContent="center">
+                  <View key={round} style={styles.roundCell}>
                     {hasData ? (
-                      <>
-                        <Text fontSize={11} color="$gray10">
-                          {call}
+                      <View style={styles.roundData}>
+                        <Text style={styles.callText}>{data.call}</Text>
+                        <Text style={[
+                          styles.pointsText,
+                          madeCall && styles.pointsSuccess
+                        ]}>
+                          {data.points}
                         </Text>
-                        <Text fontSize={13} fontWeight="600">
-                          {points}
-                        </Text>
-                      </>
+                      </View>
                     ) : (
-                      <Text fontSize={13} color="$gray8">
-                        -
-                      </Text>
+                      <Text style={styles.emptyText}>-</Text>
                     )}
-                  </YStack>
+                  </View>
                 );
               })}
 
-              <YStack width={80} alignItems="center" justifyContent="center">
-                <Text fontSize={16} fontWeight="bold" color="$blue10">
-                  {player.totalPoints}
-                </Text>
-              </YStack>
-            </XStack>
+              <View style={styles.totalCell}>
+                <Text style={styles.totalText}>{player.totalPoints}</Text>
+              </View>
+            </View>
           ))}
-        </YStack>
+        </View>
       </ScrollView>
-    </Card>
+    </View>
   );
 }
+
+const createStyles = (colors: any) => StyleSheet.create({
+  container: {
+    backgroundColor: colors.card,
+    borderRadius: 16,
+    overflow: 'hidden',
+    marginBottom: 16,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    backgroundColor: colors.cardAlt,
+    borderBottomWidth: 2,
+    borderBottomColor: colors.border,
+  },
+  dataRow: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  rowEven: {
+    backgroundColor: colors.card,
+  },
+  rowOdd: {
+    backgroundColor: colors.cardAlt,
+  },
+  playerCell: {
+    width: 120,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+  },
+  roundCell: {
+    width: 56,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+  },
+  totalCell: {
+    width: 70,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    backgroundColor: colors.cardAlt,
+  },
+  headerText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textMuted,
+  },
+  emoji: {
+    fontSize: 20,
+    marginRight: 8,
+  },
+  playerName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
+    flex: 1,
+  },
+  roundData: {
+    alignItems: 'center',
+  },
+  callText: {
+    fontSize: 11,
+    color: colors.textMuted,
+  },
+  pointsText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  pointsSuccess: {
+    color: colors.accent,
+  },
+  emptyText: {
+    fontSize: 14,
+    color: colors.textMuted,
+  },
+  totalText: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: colors.accent,
+  },
+});

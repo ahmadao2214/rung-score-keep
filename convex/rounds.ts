@@ -1,6 +1,5 @@
 import { v } from 'convex/values';
 import { mutation, query } from './_generated/server';
-import { Id } from './_generated/dataModel';
 
 const trumpCardValidator = v.union(
   v.object({
@@ -44,14 +43,16 @@ export const createRound = mutation({
     const game = await ctx.db.get(args.gameId);
     if (!game) throw new Error('Game not found');
 
-    // Create player rounds array
+    // Create player rounds array with -1 indicating no call yet
     const playerRounds = game.players.map((player) => ({
       playerId: player.id,
       playerName: player.name,
-      call: 0,
+      playerEmoji: player.emoji || '👤',
+      call: -1, // -1 indicates not yet called
       handsWon: 0,
       points: 0,
       isDealer: player.position === game.dealerIndex,
+      callSubmittedBy: undefined,
     }));
 
     const roundId = await ctx.db.insert('rounds', {
@@ -110,7 +111,7 @@ export const getRoundByNumber = query({
 });
 
 /**
- * Set a player's call
+ * Set a player's call (by scorekeeper)
  */
 export const setPlayerCall = mutation({
   args: {
@@ -122,23 +123,126 @@ export const setPlayerCall = mutation({
     const round = await ctx.db.get(args.roundId);
     if (!round) throw new Error('Round not found');
 
-    // Validate call
     if (args.call < 0 || args.call > round.roundNumber) {
       throw new Error(`Call must be between 0 and ${round.roundNumber}`);
     }
 
-    // Update player's call
     const updatedPlayerRounds = round.playerRounds.map((pr) =>
-      pr.playerId === args.playerId ? { ...pr, call: args.call } : pr
+      pr.playerId === args.playerId 
+        ? { ...pr, call: args.call, callSubmittedBy: 'scorekeeper' as const } 
+        : pr
     );
 
-    // Check if all calls are set
-    const allCallsSet = updatedPlayerRounds.every((pr) => pr.call !== undefined);
+    const allCallsSet = updatedPlayerRounds.every((pr) => pr.call >= 0);
 
     await ctx.db.patch(args.roundId, {
       playerRounds: updatedPlayerRounds,
       ...(allCallsSet ? { status: 'playing' as const } : {}),
     });
+  },
+});
+
+/**
+ * Player submits their own call via QR sync
+ */
+export const submitPlayerCall = mutation({
+  args: {
+    gameId: v.id('games'),
+    roundNumber: v.number(),
+    playerId: v.string(),
+    call: v.number(),
+  },
+  handler: async (ctx, args) => {
+    // Get the current round
+    const rounds = await ctx.db
+      .query('rounds')
+      .withIndex('by_game_and_round', (q) =>
+        q.eq('gameId', args.gameId).eq('roundNumber', args.roundNumber)
+      )
+      .collect();
+
+    const round = rounds[0];
+    if (!round) throw new Error('Round not found');
+
+    if (round.status !== 'calling') {
+      throw new Error('Calling phase has ended');
+    }
+
+    if (args.call < 0 || args.call > round.roundNumber) {
+      throw new Error(`Call must be between 0 and ${round.roundNumber}`);
+    }
+
+    // Find player and check if they already called
+    const playerRound = round.playerRounds.find((pr) => pr.playerId === args.playerId);
+    if (!playerRound) throw new Error('Player not found in round');
+
+    if (playerRound.call >= 0) {
+      throw new Error('You have already submitted your call');
+    }
+
+    // Update player's call
+    const updatedPlayerRounds = round.playerRounds.map((pr) =>
+      pr.playerId === args.playerId 
+        ? { ...pr, call: args.call, callSubmittedBy: 'player' as const } 
+        : pr
+    );
+
+    // Check if all calls are set
+    const allCallsSet = updatedPlayerRounds.every((pr) => pr.call >= 0);
+
+    await ctx.db.patch(round._id, {
+      playerRounds: updatedPlayerRounds,
+      ...(allCallsSet ? { status: 'playing' as const } : {}),
+    });
+
+    return { success: true };
+  },
+});
+
+/**
+ * Get current round status for a player (used by QR sync)
+ */
+export const getCurrentRoundForPlayer = query({
+  args: {
+    gameId: v.id('games'),
+    playerId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) return null;
+
+    const rounds = await ctx.db
+      .query('rounds')
+      .withIndex('by_game_and_round', (q) =>
+        q.eq('gameId', args.gameId).eq('roundNumber', game.currentRound)
+      )
+      .collect();
+
+    const round = rounds[0];
+    if (!round) return { game, round: null, playerRound: null };
+
+    const playerRound = round.playerRounds.find((pr) => pr.playerId === args.playerId);
+
+    return {
+      game: {
+        currentRound: game.currentRound,
+        status: game.status,
+        joinCode: game.joinCode,
+      },
+      round: {
+        roundNumber: round.roundNumber,
+        status: round.status,
+        trumpCard: round.trumpCard,
+      },
+      playerRound: playerRound || null,
+      allCalls: round.playerRounds.map((pr) => ({
+        playerId: pr.playerId,
+        playerName: pr.playerName,
+        playerEmoji: pr.playerEmoji,
+        hasCalled: pr.call >= 0,
+        call: pr.call >= 0 ? pr.call : null,
+      })),
+    };
   },
 });
 
@@ -155,12 +259,10 @@ export const updateHandsWon = mutation({
     const round = await ctx.db.get(args.roundId);
     if (!round) throw new Error('Round not found');
 
-    // Validate hands won
     if (args.handsWon < 0 || args.handsWon > round.roundNumber) {
       throw new Error(`Hands won must be between 0 and ${round.roundNumber}`);
     }
 
-    // Calculate points
     const playerRound = round.playerRounds.find(
       (pr) => pr.playerId === args.playerId
     );
@@ -170,7 +272,6 @@ export const updateHandsWon = mutation({
       ? calculatePoints(playerRound.call)
       : 0;
 
-    // Update player's hands won and points
     const updatedPlayerRounds = round.playerRounds.map((pr) =>
       pr.playerId === args.playerId
         ? { ...pr, handsWon: args.handsWon, points }

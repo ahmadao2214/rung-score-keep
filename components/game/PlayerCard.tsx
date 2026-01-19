@@ -1,4 +1,4 @@
-import { Text, YStack, XStack } from '@tamagui/core';
+import { Text, YStack, XStack } from 'tamagui';
 import { Card } from '../ui/Card';
 
 interface PlayerCardProps {

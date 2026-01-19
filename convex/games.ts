@@ -1,18 +1,29 @@
 import { v } from 'convex/values';
 import { mutation, query } from './_generated/server';
-import { Id } from './_generated/dataModel';
+
+// Generate a random 4-character uppercase join code
+function generateJoinCode(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Exclude confusing chars I, O, 0, 1
+  let code = '';
+  for (let i = 0; i < 4; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+}
 
 /**
- * Create a new game
+ * Create a new game with join code for QR sync
  */
 export const createGame = mutation({
   args: {
     numberOfPlayers: v.number(),
-    players: v.array(v.object({ name: v.string() })),
+    players: v.array(v.object({ 
+      name: v.string(),
+      emoji: v.optional(v.string()),
+    })),
     dealerIndex: v.number(),
   },
   handler: async (ctx, args) => {
-    // Validate inputs
     if (args.numberOfPlayers < 2 || args.numberOfPlayers > 8) {
       throw new Error('Number of players must be between 2 and 8');
     }
@@ -30,9 +41,24 @@ export const createGame = mutation({
       id: `player_${Date.now()}_${index}`,
       name: player.name,
       position: index,
+      emoji: player.emoji || '👤',
     }));
 
-    // Create the game
+    // Generate unique join code
+    let joinCode = generateJoinCode();
+    let attempts = 0;
+    while (attempts < 10) {
+      const existing = await ctx.db
+        .query('games')
+        .withIndex('by_join_code', (q) => q.eq('joinCode', joinCode))
+        .first();
+      if (!existing || existing.status === 'completed') {
+        break;
+      }
+      joinCode = generateJoinCode();
+      attempts++;
+    }
+
     const gameId = await ctx.db.insert('games', {
       status: 'in_progress',
       createdAt: Date.now(),
@@ -40,9 +66,11 @@ export const createGame = mutation({
       dealerIndex: args.dealerIndex,
       currentRound: 1,
       players,
+      joinCode,
+      playerSessions: [],
     });
 
-    return gameId;
+    return { gameId, joinCode };
   },
 });
 
@@ -53,6 +81,72 @@ export const getGame = query({
   args: { gameId: v.id('games') },
   handler: async (ctx, args) => {
     return await ctx.db.get(args.gameId);
+  },
+});
+
+/**
+ * Get a game by join code
+ */
+export const getGameByJoinCode = query({
+  args: { joinCode: v.string() },
+  handler: async (ctx, args) => {
+    const game = await ctx.db
+      .query('games')
+      .withIndex('by_join_code', (q) => q.eq('joinCode', args.joinCode.toUpperCase()))
+      .first();
+    return game;
+  },
+});
+
+/**
+ * Player joins game via QR code
+ */
+export const joinGame = mutation({
+  args: {
+    joinCode: v.string(),
+    playerId: v.string(),
+    deviceId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db
+      .query('games')
+      .withIndex('by_join_code', (q) => q.eq('joinCode', args.joinCode.toUpperCase()))
+      .first();
+
+    if (!game) {
+      throw new Error('Game not found');
+    }
+
+    if (game.status !== 'in_progress') {
+      throw new Error('Game is not active');
+    }
+
+    // Check if player exists in game
+    const player = game.players.find((p) => p.id === args.playerId);
+    if (!player) {
+      throw new Error('Player not found in game');
+    }
+
+    // Check if already joined
+    const sessions = game.playerSessions || [];
+    const existingSession = sessions.find((s) => s.playerId === args.playerId);
+    if (existingSession) {
+      return { success: true, alreadyJoined: true };
+    }
+
+    // Add player session
+    await ctx.db.patch(game._id, {
+      playerSessions: [
+        ...sessions,
+        {
+          playerId: args.playerId,
+          joinedAt: Date.now(),
+          deviceId: args.deviceId,
+        },
+      ],
+    });
+
+    return { success: true, alreadyJoined: false };
   },
 });
 

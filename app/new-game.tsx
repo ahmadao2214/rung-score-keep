@@ -1,33 +1,42 @@
 import { useState } from 'react';
-import { ScrollView, Pressable, Alert } from 'react-native';
-import { Text, YStack, XStack } from '@tamagui/core';
+import { ScrollView, Pressable, Alert, StyleSheet, TextInput, View, Text, TouchableOpacity, Modal } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Card } from '../components/ui/Card';
-import { Button } from '../components/ui/Button';
-import { Input } from '../components/ui/Input';
 import { validatePlayerNames, isValidPlayerCount, isValidDealerIndex } from '../utils/validation';
 import { storageHelpers, StorageKeys } from '../lib/mmkv';
+import { useTheme } from '../lib/theme';
+
+const PLAYER_EMOJIS = [
+  '😊', '😎', '🤓', '🥳', '😈', '👻', '🤖', '👽',
+  '🦊', '🐱', '🐶', '🐸', '🦁', '🐯', '🐻', '🐼',
+  '🌟', '⚡', '🔥', '💎', '🎯', '🎲', '🃏', '👑',
+  '🚀', '🎸', '🎮', '⚽', '🏀', '🎱', '🌈', '🍀',
+];
+
+const DEFAULT_EMOJIS = ['😊', '😎', '🤓', '🥳', '😈', '👻', '🤖', '👽'];
 
 export default function NewGame() {
   const router = useRouter();
+  const { colors } = useTheme();
   const [numberOfPlayers, setNumberOfPlayers] = useState(4);
   const [playerNames, setPlayerNames] = useState<string[]>(
     Array(4).fill('').map((_, i) => `Player ${i + 1}`)
   );
+  const [playerEmojis, setPlayerEmojis] = useState<string[]>(DEFAULT_EMOJIS.slice(0, 4));
   const [dealerIndex, setDealerIndex] = useState(0);
   const [errors, setErrors] = useState<{ players?: string; general?: string }>({});
+  const [emojiPickerIndex, setEmojiPickerIndex] = useState<number | null>(null);
 
-  // Update player names array when number of players changes
   const handlePlayerCountChange = (count: number) => {
     if (!isValidPlayerCount(count)) return;
-
     setNumberOfPlayers(count);
     const newNames = Array(count).fill('').map((_, i) =>
       playerNames[i] || `Player ${i + 1}`
     );
+    const newEmojis = Array(count).fill('').map((_, i) =>
+      playerEmojis[i] || DEFAULT_EMOJIS[i] || '😊'
+    );
     setPlayerNames(newNames);
-
-    // Adjust dealer index if needed
+    setPlayerEmojis(newEmojis);
     if (dealerIndex >= count) {
       setDealerIndex(count - 1);
     }
@@ -37,11 +46,18 @@ export default function NewGame() {
     const newNames = [...playerNames];
     newNames[index] = name;
     setPlayerNames(newNames);
-    setErrors({}); // Clear errors when user makes changes
+    setErrors({});
+  };
+
+  const handleEmojiSelect = (emoji: string) => {
+    if (emojiPickerIndex === null) return;
+    const newEmojis = [...playerEmojis];
+    newEmojis[emojiPickerIndex] = emoji;
+    setPlayerEmojis(newEmojis);
+    setEmojiPickerIndex(null);
   };
 
   const handleStartGame = () => {
-    // Validate inputs
     const nameValidation = validatePlayerNames(playerNames);
     if (!nameValidation.isValid) {
       setErrors({ players: nameValidation.error });
@@ -55,7 +71,6 @@ export default function NewGame() {
       return;
     }
 
-    // Create game object (will be saved to Convex when available)
     const game = {
       id: `game_${Date.now()}`,
       numberOfPlayers,
@@ -63,6 +78,7 @@ export default function NewGame() {
         id: `player_${Date.now()}_${index}`,
         name: name.trim(),
         position: index,
+        emoji: playerEmojis[index] || '😊',
       })),
       dealerIndex,
       currentRound: 1,
@@ -70,122 +86,373 @@ export default function NewGame() {
       createdAt: Date.now(),
     };
 
-    // Save to MMKV for offline-first
     storageHelpers.setObject(StorageKeys.CURRENT_GAME, game);
-
-    // Navigate to game screen
     router.push(`/game/${game.id}`);
   };
 
+  const styles = createStyles(colors);
+
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: '#f5f5f5' }}>
-      <YStack padding={20} gap={20}>
-        <Text fontSize={24} fontWeight="bold">
-          Setup New Game
-        </Text>
+    <>
+      <ScrollView 
+        style={styles.scrollContainer} 
+        contentContainerStyle={styles.container}
+        showsVerticalScrollIndicator={true}
+      >
+        <View style={styles.header}>
+          <Text style={styles.title}>New Game</Text>
+          <Text style={styles.subtitle}>Set up your Rung match</Text>
+        </View>
 
-        {/* Number of Players */}
-        <Card>
-          <YStack gap={12}>
-            <Text fontSize={18} fontWeight="600">
-              Number of Players
-            </Text>
-            <XStack gap={8} flexWrap="wrap">
-              {[2, 3, 4, 5, 6, 7, 8].map((count) => (
-                <Pressable
-                  key={count}
-                  onPress={() => handlePlayerCountChange(count)}
-                  style={{
-                    backgroundColor: numberOfPlayers === count ? '#007AFF' : '#f0f0f0',
-                    paddingHorizontal: 20,
-                    paddingVertical: 12,
-                    borderRadius: 8,
-                    minWidth: 50,
-                    alignItems: 'center',
-                  }}
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Players</Text>
+          <View style={styles.countRow}>
+            {[2, 3, 4, 5, 6].map((count) => (
+              <TouchableOpacity
+                key={count}
+                onPress={() => handlePlayerCountChange(count)}
+                style={[
+                  styles.countButton,
+                  numberOfPlayers === count && styles.countButtonActive,
+                ]}
+                activeOpacity={0.7}
+              >
+                <Text
+                  style={[
+                    styles.countButtonText,
+                    numberOfPlayers === count && styles.countButtonTextActive,
+                  ]}
                 >
-                  <Text
-                    fontSize={18}
-                    fontWeight="600"
-                    color={numberOfPlayers === count ? '#fff' : '#000'}
-                  >
-                    {count}
-                  </Text>
-                </Pressable>
-              ))}
-            </XStack>
-          </YStack>
-        </Card>
-
-        {/* Player Names */}
-        <Card>
-          <YStack gap={12}>
-            <Text fontSize={18} fontWeight="600">
-              Player Names
-            </Text>
-            {errors.players && (
-              <Text fontSize={14} color="$red10">
-                {errors.players}
-              </Text>
-            )}
-            {playerNames.map((name, index) => (
-              <YStack key={index} gap={4}>
-                <Text fontSize={14} color="$gray10">
-                  Player {index + 1}
+                  {count}
                 </Text>
-                <Input
-                  value={name}
-                  onChangeText={(text) => handlePlayerNameChange(index, text)}
-                  placeholder={`Player ${index + 1} name`}
-                  autoCapitalize="words"
-                />
-              </YStack>
+              </TouchableOpacity>
             ))}
-          </YStack>
-        </Card>
+          </View>
+        </View>
 
-        {/* Dealer Selection */}
-        <Card>
-          <YStack gap={12}>
-            <Text fontSize={18} fontWeight="600">
-              Select Dealer
-            </Text>
-            <XStack gap={8} flexWrap="wrap">
-              {playerNames.map((name, index) => (
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Player Details</Text>
+          {errors.players && (
+            <Text style={styles.errorText}>{errors.players}</Text>
+          )}
+          <View style={styles.inputsContainer}>
+            {playerNames.map((name, index) => (
+              <View key={index} style={styles.playerRow}>
                 <Pressable
-                  key={index}
-                  onPress={() => setDealerIndex(index)}
-                  style={{
-                    backgroundColor: dealerIndex === index ? '#2e7d32' : '#f0f0f0',
-                    paddingHorizontal: 16,
-                    paddingVertical: 10,
-                    borderRadius: 8,
-                    flex: 1,
-                    minWidth: 100,
-                    alignItems: 'center',
-                  }}
+                  style={styles.emojiButton}
+                  onPress={() => setEmojiPickerIndex(index)}
                 >
+                  <Text style={styles.emojiButtonText}>{playerEmojis[index]}</Text>
+                </Pressable>
+                <View style={styles.nameInputContainer}>
+                  <TextInput
+                    value={name}
+                    onChangeText={(text) => handlePlayerNameChange(index, text)}
+                    placeholder={`Player ${index + 1}`}
+                    placeholderTextColor={colors.textMuted}
+                    style={styles.textInput}
+                    autoCapitalize="words"
+                  />
+                </View>
+              </View>
+            ))}
+          </View>
+        </View>
+
+        <View style={styles.card}>
+          <View style={styles.dealerHeader}>
+            <Text style={styles.sectionTitle}>First Dealer</Text>
+            <Text style={styles.sectionSubtitle}>Who deals the first hand?</Text>
+          </View>
+          <View style={styles.dealerList}>
+            {playerNames.map((name, index) => (
+              <Pressable
+                key={index}
+                onPress={() => setDealerIndex(index)}
+                style={[
+                  styles.dealerOption,
+                  dealerIndex === index && styles.dealerOptionActive,
+                ]}
+              >
+                <View style={styles.dealerRow}>
+                  <View
+                    style={[
+                      styles.radioOuter,
+                      dealerIndex === index && styles.radioOuterActive,
+                    ]}
+                  >
+                    {dealerIndex === index && <View style={styles.radioInner} />}
+                  </View>
+                  <Text style={styles.dealerEmoji}>{playerEmojis[index]}</Text>
                   <Text
-                    fontSize={16}
-                    fontWeight="600"
-                    color={dealerIndex === index ? '#fff' : '#000'}
-                    numberOfLines={1}
+                    style={[
+                      styles.dealerText,
+                      dealerIndex === index && styles.dealerTextActive,
+                    ]}
                   >
                     {name || `Player ${index + 1}`}
                   </Text>
+                </View>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+
+        <Pressable style={styles.startButton} onPress={handleStartGame}>
+          <Text style={styles.startButtonText}>Start Game</Text>
+        </Pressable>
+
+        <View style={{ height: 40 }} />
+      </ScrollView>
+
+      <Modal
+        visible={emojiPickerIndex !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEmojiPickerIndex(null)}
+      >
+        <Pressable 
+          style={styles.modalOverlay} 
+          onPress={() => setEmojiPickerIndex(null)}
+        >
+          <View style={styles.emojiPicker}>
+            <Text style={styles.emojiPickerTitle}>Choose an emoji</Text>
+            <View style={styles.emojiGrid}>
+              {PLAYER_EMOJIS.map((emoji) => (
+                <Pressable
+                  key={emoji}
+                  style={[
+                    styles.emojiOption,
+                    emojiPickerIndex !== null && 
+                    playerEmojis[emojiPickerIndex] === emoji && 
+                    styles.emojiOptionSelected,
+                  ]}
+                  onPress={() => handleEmojiSelect(emoji)}
+                >
+                  <Text style={styles.emojiOptionText}>{emoji}</Text>
                 </Pressable>
               ))}
-            </XStack>
-          </YStack>
-        </Card>
-
-        {/* Start Game Button */}
-        <Button size="large" onPress={handleStartGame}>
-          Start Game
-        </Button>
-
-        <YStack height={40} />
-      </YStack>
-    </ScrollView>
+            </View>
+          </View>
+        </Pressable>
+      </Modal>
+    </>
   );
 }
+
+const createStyles = (colors: any) => StyleSheet.create({
+  scrollContainer: {
+    flex: 1,
+    backgroundColor: colors.background,
+    // @ts-ignore - web-specific property for proper scrolling
+    maxHeight: '100vh',
+  },
+  container: {
+    padding: 20,
+    paddingBottom: 60,
+  },
+  header: {
+    marginBottom: 24,
+  },
+  title: {
+    fontSize: 32,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  subtitle: {
+    fontSize: 16,
+    color: colors.textMuted,
+    marginTop: 4,
+  },
+  card: {
+    backgroundColor: colors.card,
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: 16,
+  },
+  sectionSubtitle: {
+    fontSize: 14,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  errorText: {
+    fontSize: 14,
+    color: colors.error,
+    marginBottom: 12,
+  },
+  countRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  countButton: {
+    width: 52,
+    height: 52,
+    borderRadius: 12,
+    backgroundColor: colors.cardAlt,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'transparent',
+    marginRight: 10,
+    marginBottom: 10,
+  },
+  countButtonActive: {
+    backgroundColor: colors.accentLight,
+    borderColor: colors.accent,
+  },
+  countButtonText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: colors.textMuted,
+  },
+  countButtonTextActive: {
+    color: colors.accent,
+  },
+  inputsContainer: {
+  },
+  playerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  emojiButton: {
+    width: 52,
+    height: 52,
+    borderRadius: 12,
+    backgroundColor: colors.cardAlt,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: colors.border,
+    marginRight: 12,
+  },
+  emojiButtonText: {
+    fontSize: 28,
+  },
+  nameInputContainer: {
+    flex: 1,
+  },
+  textInput: {
+    backgroundColor: colors.cardAlt,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 14,
+    fontSize: 16,
+    color: colors.text,
+  },
+  dealerHeader: {
+    marginBottom: 16,
+  },
+  dealerList: {
+  },
+  dealerOption: {
+    padding: 14,
+    borderRadius: 12,
+    backgroundColor: colors.cardAlt,
+    borderWidth: 2,
+    borderColor: 'transparent',
+    marginBottom: 10,
+  },
+  dealerOptionActive: {
+    backgroundColor: colors.accentLight,
+    borderColor: colors.accent,
+  },
+  dealerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  radioOuter: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  radioOuterActive: {
+    borderColor: colors.accent,
+  },
+  radioInner: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: colors.accent,
+  },
+  dealerEmoji: {
+    fontSize: 24,
+    marginRight: 12,
+  },
+  dealerText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: colors.textSecondary,
+  },
+  dealerTextActive: {
+    color: colors.accent,
+    fontWeight: '600',
+  },
+  startButton: {
+    backgroundColor: colors.accent,
+    paddingVertical: 18,
+    borderRadius: 14,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  startButtonText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  emojiPicker: {
+    backgroundColor: colors.card,
+    borderRadius: 20,
+    padding: 20,
+    width: '100%',
+    maxWidth: 340,
+  },
+  emojiPickerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: colors.text,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  emojiGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+  },
+  emojiOption: {
+    width: 52,
+    height: 52,
+    borderRadius: 12,
+    backgroundColor: colors.cardAlt,
+    alignItems: 'center',
+    justifyContent: 'center',
+    margin: 4,
+  },
+  emojiOptionSelected: {
+    backgroundColor: colors.accentLight,
+    borderWidth: 2,
+    borderColor: colors.accent,
+  },
+  emojiOptionText: {
+    fontSize: 28,
+  },
+});

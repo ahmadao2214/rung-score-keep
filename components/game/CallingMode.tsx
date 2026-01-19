@@ -1,10 +1,8 @@
 import { useState } from 'react';
-import { ScrollView, Pressable, Alert } from 'react-native';
-import { Text, YStack, XStack } from '@tamagui/core';
-import { Card } from '../ui/Card';
-import { Button } from '../ui/Button';
+import { ScrollView, Pressable, Alert, View, Text, StyleSheet } from 'react-native';
 import { TrumpCard } from './TrumpCard';
 import { TrumpCardPicker } from './TrumpCardPicker';
+import { QRCodeDisplay } from './QRCodeDisplay';
 import {
   calculateTotalCalls,
   getForbiddenDealerCall,
@@ -12,11 +10,13 @@ import {
 } from '../../utils/validation';
 import { generateRandomTrump, createManualTrump, TrumpCard as TrumpCardType } from '../../utils/trump';
 import { Rank, Suit } from '../../utils/constants';
+import { useTheme } from '../../lib/theme';
 
 interface Player {
   id: string;
   name: string;
   position: number;
+  emoji?: string;
 }
 
 interface PlayerCall {
@@ -29,10 +29,13 @@ interface CallingModeProps {
   dealerIndex: number;
   roundNumber: number;
   numberOfPlayers: number;
+  joinCode?: string;
+  joinedPlayerCount?: number;
   onComplete: (calls: { playerId: string; call: number }[], trumpCard: TrumpCardType | null) => void;
 }
 
-export function CallingMode({ players, dealerIndex, roundNumber, numberOfPlayers, onComplete }: CallingModeProps) {
+export function CallingMode({ players, dealerIndex, roundNumber, numberOfPlayers, joinCode, joinedPlayerCount = 0, onComplete }: CallingModeProps) {
+  const { colors } = useTheme();
   const [trumpCard, setTrumpCard] = useState<TrumpCardType | null>(() =>
     generateRandomTrump(roundNumber, numberOfPlayers)
   );
@@ -40,8 +43,8 @@ export function CallingMode({ players, dealerIndex, roundNumber, numberOfPlayers
   const [playerCalls, setPlayerCalls] = useState<PlayerCall[]>(
     players.map(p => ({ playerId: p.id, call: null }))
   );
+  const styles = createStyles(colors);
 
-  // Determine calling order (clockwise from player after dealer)
   const callingOrder = [...Array(numberOfPlayers)].map((_, i) =>
     (dealerIndex + 1 + i) % numberOfPlayers
   );
@@ -55,7 +58,6 @@ export function CallingMode({ players, dealerIndex, roundNumber, numberOfPlayers
   const allCallsMade = playerCalls.every(pc => pc.call !== null);
 
   const handleSetCall = (playerId: string, call: number) => {
-    // Validate if dealer
     if (isDealer) {
       const otherCalls = playerCalls
         .filter(pc => pc.playerId !== playerId && pc.call !== null)
@@ -92,134 +94,139 @@ export function CallingMode({ players, dealerIndex, roundNumber, numberOfPlayers
   const currentPlayer = players.find(p => p.position === currentPlayerPosition);
 
   return (
-    <ScrollView style={{ flex: 1 }}>
-      <YStack padding={20} gap={20}>
-        <Text fontSize={24} fontWeight="bold">
-          Round {roundNumber} - Calling Phase
-        </Text>
+    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.roundTitle}>Round {roundNumber}</Text>
+        <View style={styles.phaseBadge}>
+          <Text style={styles.phaseBadgeText}>Calling</Text>
+        </View>
+      </View>
 
-        {/* Trump Card Display */}
-        <TrumpCard
-          trumpCard={trumpCard}
-          roundNumber={roundNumber}
-          numberOfPlayers={numberOfPlayers}
+      {/* QR Code for player sync */}
+      {joinCode && (
+        <QRCodeDisplay
+          joinCode={joinCode}
+          playerCount={numberOfPlayers}
+          joinedCount={joinedPlayerCount}
         />
+      )}
 
-        {trumpCard && (
-          <Button variant="outline" size="small" onPress={() => setShowTrumpPicker(true)}>
-            Change Trump (Dealer Override)
-          </Button>
-        )}
+      {/* Trump Card Display */}
+      <TrumpCard
+        trumpCard={trumpCard}
+        roundNumber={roundNumber}
+        numberOfPlayers={numberOfPlayers}
+      />
 
-        {/* Current Player Indicator */}
-        {!allCallsMade && currentPlayer && (
-          <Card padding="medium" borderColor="$blue10" borderWidth={2}>
-            <Text fontSize={18} fontWeight="600" textAlign="center">
-              {currentPlayer.name}'s turn to call
-              {isDealer && ' (Dealer)'}
-            </Text>
-          </Card>
-        )}
+      {trumpCard && (
+        <Pressable style={styles.changeTrumpButton} onPress={() => setShowTrumpPicker(true)}>
+          <Text style={styles.changeTrumpText}>Change Trump</Text>
+        </Pressable>
+      )}
 
-        {/* Running Total */}
-        <XStack justifyContent="space-between" alignItems="center">
-          <Text fontSize={16}>Total Calls:</Text>
-          <Text
-            fontSize={24}
-            fontWeight="bold"
-            color={totalCalls === roundNumber ? '$red10' : '$blue10'}
-          >
-            {totalCalls}
+      {/* Current Player Indicator */}
+      {!allCallsMade && currentPlayer && (
+        <View style={styles.currentPlayerCard}>
+          <Text style={styles.currentPlayerText}>
+            {currentPlayer.name}'s turn
+            {isDealer && (
+              <Text style={styles.dealerNote}> (Dealer)</Text>
+            )}
           </Text>
-        </XStack>
+        </View>
+      )}
 
-        {/* Player Call Entry */}
-        {players.map((player, index) => {
-          const playerCall = playerCalls.find(pc => pc.playerId === player.id);
-          const isCurrent = player.position === currentPlayerPosition;
-          const hasCalled = playerCall?.call !== null;
+      {/* Running Total */}
+      <View style={styles.totalRow}>
+        <Text style={styles.totalLabel}>Total Calls</Text>
+        <Text style={[
+          styles.totalNumber,
+          totalCalls === roundNumber ? styles.totalDanger : styles.totalNormal
+        ]}>
+          {totalCalls}
+        </Text>
+      </View>
 
-          return (
-            <Card
-              key={player.id}
-              padding="medium"
-              borderWidth={isCurrent ? 2 : 1}
-              borderColor={isCurrent ? '$blue10' : '$borderColor'}
-            >
-              <YStack gap={12}>
-                <XStack justifyContent="space-between" alignItems="center">
-                  <Text fontSize={18} fontWeight="600">
-                    {player.name}
-                  </Text>
-                  {player.position === dealerIndex && (
-                    <XStack backgroundColor="$green" paddingHorizontal={8} paddingVertical={4} borderRadius={4}>
-                      <Text fontSize={12} fontWeight="bold" color="$white">
-                        DEALER
-                      </Text>
-                    </XStack>
-                  )}
-                </XStack>
+      {/* Player Call Cards */}
+      {players.map((player) => {
+        const playerCall = playerCalls.find(pc => pc.playerId === player.id);
+        const isCurrent = player.position === currentPlayerPosition;
+        const hasCalled = playerCall?.call !== null;
+        const isPlayerDealer = player.position === dealerIndex;
 
-                {hasCalled ? (
-                  <Text fontSize={20} fontWeight="bold" color="$blue10">
-                    Called: {playerCall.call}
-                  </Text>
-                ) : isCurrent ? (
-                  <XStack gap={8} flexWrap="wrap">
-                    {Array.from({ length: roundNumber + 1 }, (_, i) => i).map(call => {
-                      const otherCalls = playerCalls
-                        .filter(pc => pc.playerId !== player.id && pc.call !== null)
-                        .map(pc => pc.call!);
-                      const forbiddenCall = isDealer
-                        ? getForbiddenDealerCall(otherCalls, roundNumber)
-                        : null;
-                      const isForbidden = forbiddenCall !== null && call === forbiddenCall;
+        const otherCalls = playerCalls
+          .filter(pc => pc.playerId !== player.id && pc.call !== null)
+          .map(pc => pc.call!);
+        const forbiddenCall = isCurrent && isDealer
+          ? getForbiddenDealerCall(otherCalls, roundNumber)
+          : null;
 
-                      return (
-                        <Pressable
-                          key={call}
-                          onPress={() => !isForbidden && handleSetCall(player.id, call)}
-                          style={{
-                            backgroundColor: isForbidden ? '#ffebee' : '#e3f2fd',
-                            paddingHorizontal: 20,
-                            paddingVertical: 12,
-                            borderRadius: 8,
-                            borderWidth: isForbidden ? 2 : 0,
-                            borderColor: '#f44336',
-                            minWidth: 50,
-                            alignItems: 'center',
-                          }}
-                        >
-                          <Text
-                            fontSize={18}
-                            fontWeight="600"
-                            color={isForbidden ? '#f44336' : '#1976d2'}
-                          >
-                            {call}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                  </XStack>
-                ) : (
-                  <Text fontSize={16} color="$gray10">
-                    Waiting...
-                  </Text>
+        return (
+          <View 
+            key={player.id} 
+            style={[styles.playerCard, isCurrent && styles.playerCardActive]}
+          >
+            <View style={styles.playerHeader}>
+              <View style={styles.playerInfo}>
+                <Text style={styles.playerEmoji}>{player.emoji || '👤'}</Text>
+                <Text style={styles.playerName}>{player.name}</Text>
+                {isPlayerDealer && (
+                  <View style={styles.dealerBadge}>
+                    <Text style={styles.dealerBadgeText}>D</Text>
+                  </View>
                 )}
-              </YStack>
-            </Card>
-          );
-        })}
+              </View>
+              {hasCalled && (
+                <View style={styles.calledBadge}>
+                  <Text style={styles.calledNumber}>{playerCall.call}</Text>
+                </View>
+              )}
+            </View>
 
-        {/* Start Playing Button */}
-        {allCallsMade && (
-          <Button size="large" onPress={handleStartPlaying}>
-            Start Playing
-          </Button>
-        )}
+            {hasCalled ? (
+              <View style={styles.calledRow}>
+                <Text style={styles.calledLabel}>Called {playerCall.call}</Text>
+              </View>
+            ) : isCurrent ? (
+              <View style={styles.callOptions}>
+                {Array.from({ length: roundNumber + 1 }, (_, i) => i).map(call => {
+                  const isForbidden = forbiddenCall !== null && call === forbiddenCall;
 
-        <YStack height={40} />
-      </YStack>
+                  return (
+                    <Pressable
+                      key={call}
+                      onPress={() => !isForbidden && handleSetCall(player.id, call)}
+                      style={[
+                        styles.callButton,
+                        isForbidden && styles.callButtonForbidden,
+                      ]}
+                    >
+                      <Text style={[
+                        styles.callButtonText,
+                        isForbidden && styles.callButtonTextForbidden,
+                      ]}>
+                        {call}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : (
+              <Text style={styles.waitingText}>Waiting...</Text>
+            )}
+          </View>
+        );
+      })}
+
+      {/* Start Playing Button */}
+      {allCallsMade && (
+        <Pressable style={styles.startButton} onPress={handleStartPlaying}>
+          <Text style={styles.startButtonText}>Start Playing</Text>
+        </Pressable>
+      )}
+
+      <View style={{ height: 40 }} />
 
       <TrumpCardPicker
         visible={showTrumpPicker}
@@ -229,3 +236,194 @@ export function CallingMode({ players, dealerIndex, roundNumber, numberOfPlayers
     </ScrollView>
   );
 }
+
+const createStyles = (colors: any) => StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  content: {
+    padding: 20,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  roundTitle: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: colors.text,
+    marginRight: 12,
+  },
+  phaseBadge: {
+    backgroundColor: colors.warning + '20',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  phaseBadgeText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.warning,
+  },
+  changeTrumpButton: {
+    alignSelf: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    marginTop: 12,
+  },
+  changeTrumpText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.accent,
+  },
+  currentPlayerCard: {
+    backgroundColor: colors.accentLight,
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 16,
+    borderWidth: 2,
+    borderColor: colors.accent,
+  },
+  currentPlayerText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: colors.accent,
+    textAlign: 'center',
+  },
+  dealerNote: {
+    fontWeight: '400',
+    color: colors.textMuted,
+  },
+  totalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 20,
+    marginBottom: 16,
+    paddingHorizontal: 4,
+  },
+  totalLabel: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: colors.textMuted,
+  },
+  totalNumber: {
+    fontSize: 28,
+    fontWeight: '700',
+  },
+  totalNormal: {
+    color: colors.accent,
+  },
+  totalDanger: {
+    color: colors.error,
+  },
+  playerCard: {
+    backgroundColor: colors.card,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  playerCardActive: {
+    borderColor: colors.accent,
+  },
+  playerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  playerInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  playerEmoji: {
+    fontSize: 28,
+    marginRight: 8,
+  },
+  playerName: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: colors.text,
+    marginRight: 8,
+  },
+  dealerBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dealerBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  calledBadge: {
+    backgroundColor: colors.accentLight,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  calledNumber: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.accent,
+  },
+  calledRow: {
+    alignItems: 'center',
+  },
+  calledLabel: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: colors.accent,
+  },
+  callOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  callButton: {
+    backgroundColor: colors.accentLight,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderRadius: 12,
+    minWidth: 52,
+    alignItems: 'center',
+    marginRight: 10,
+    marginBottom: 10,
+  },
+  callButtonForbidden: {
+    backgroundColor: colors.error + '20',
+    borderWidth: 2,
+    borderColor: colors.error,
+  },
+  callButtonText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.accent,
+  },
+  callButtonTextForbidden: {
+    color: colors.error,
+  },
+  waitingText: {
+    fontSize: 15,
+    color: colors.textMuted,
+    fontStyle: 'italic',
+  },
+  startButton: {
+    backgroundColor: colors.accent,
+    paddingVertical: 18,
+    borderRadius: 14,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  startButtonText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+});

@@ -20,15 +20,30 @@ export default defineSchema({
     dealerIndex: v.number(),
     currentRound: v.number(),
 
+    // Join code for QR sync (4 char uppercase)
+    joinCode: v.string(),
+
     // Player data
     players: v.array(
       v.object({
         id: v.string(),
         name: v.string(),
         position: v.number(),
+        emoji: v.optional(v.string()),
       })
     ),
-  }).index('by_status', ['status']),
+
+    // Track which players have joined via QR
+    playerSessions: v.optional(v.array(
+      v.object({
+        playerId: v.string(),
+        joinedAt: v.number(),
+        deviceId: v.optional(v.string()),
+      })
+    )),
+  })
+    .index('by_status', ['status'])
+    .index('by_join_code', ['joinCode']),
 
   rounds: defineTable({
     gameId: v.id('games'),
@@ -71,10 +86,12 @@ export default defineSchema({
       v.object({
         playerId: v.string(),
         playerName: v.string(),
+        playerEmoji: v.optional(v.string()),
         call: v.number(),
         handsWon: v.number(),
         points: v.number(),
         isDealer: v.boolean(),
+        callSubmittedBy: v.optional(v.union(v.literal('scorekeeper'), v.literal('player'))),
       })
     ),
 
