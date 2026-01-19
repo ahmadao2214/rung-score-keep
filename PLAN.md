@@ -53,13 +53,13 @@ A cross-platform (web, iOS, Android) score keeping application for the card game
   gameId: Id<"games">,
   roundNumber: number, // 1-13 (number of cards dealt)
 
-  // Trump card tracking
-  trumpCard: {
+  // Trump card tracking (optional - may be null if entire deck dealt)
+  trumpCard?: {
     suit: "hearts" | "diamonds" | "clubs" | "spades",
     rank: "A" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "10" | "J" | "Q" | "K",
     displayText: string, // e.g., "A♠", "7♥"
     wasAutoAssigned: boolean, // true if auto-generated, false if dealer override
-  },
+  } | null,  // null when no cards remain for trump (e.g., Round 13 with 4 players)
 
   // Player calls and results
   playerRounds: Array<{
@@ -191,9 +191,17 @@ createGame({
 - "Start Playing" button (after all calls entered)
 
 **Trump Card Assignment:**
-- **Auto-assign**: When round starts, app randomly generates trump card
-- **Dealer override**: Dealer can tap "Change Trump" to select actual trump from physical game
-- Stores both the trump card and whether it was auto-assigned or manually set
+- **Physical game rule**: Trump is the top card of remaining deck AFTER dealing to all players
+  - Trump card is NOT in any player's hand
+  - Example: Round 3, 4 players = 12 cards dealt, trump is the 13th card from deck
+- **Auto-assign**: App randomly generates trump as simulation (for speed)
+  - Calculates if cards remain: 52 - (roundNumber × numberOfPlayers)
+  - If cards remain: generate random trump
+  - If no cards remain: no trump for this round
+- **Dealer override (IMPORTANT)**: Dealer should tap "Change Trump" to match actual card from physical deck
+  - Auto-generation doesn't know which cards are in players' hands
+  - Dealer verifies physical trump and updates in app
+- **Tracking**: Stores trump card, whether it was auto-assigned or manually set, and handles null case
 
 **Key Logic:**
 - Players call in clockwise order starting from player after dealer
@@ -410,8 +418,10 @@ completeRound({
   - [ ] Calculate forbidden call for dealer
   - [ ] Validate call ranges (0 to roundNumber)
 - [ ] Implement trump card utilities
-  - [ ] Random trump generation function
+  - [ ] Cards remaining calculator (52 - roundNumber × players)
+  - [ ] Random trump generation function (returns null if no cards remain)
   - [ ] Trump card formatting (display text with symbols)
+  - [ ] Handle "no trump" scenario for high rounds with many players
 - [ ] Set up MMKV storage layer and hooks
 - [ ] Implement offline mutation queue
 - [ ] Create sync utilities (MMKV ↔ Convex)
@@ -424,6 +434,9 @@ completeRound({
 - [ ] Build PlayerCard component
 - [ ] Build ScoreTable component (scrollable)
 - [ ] Build TrumpCard display component (with suit symbols)
+  - [ ] Show visual card representation when trump exists
+  - [ ] Show "No Trump - Entire Deck Dealt" message when null
+  - [ ] Add helper text explaining trump is from remaining deck
 - [ ] Build TrumpCardPicker modal (suit + rank selectors)
 - [ ] Build CallingMode component with validation
   - [ ] Add running total display
@@ -564,6 +577,11 @@ completeRound({
 - ✅ Cannot proceed until all calls entered
 - ✅ Show running total of calls as players enter them
 - ✅ Visually indicate forbidden call option for dealer
+- ✅ Trump card handling:
+  - Auto-generate based on cards remaining (52 - roundNumber × players)
+  - Show "No Trump" message if entire deck is dealt
+  - Allow dealer to override to match physical trump card
+  - Validate that trump is from remaining deck, not players' hands
 
 ### Playing Phase
 - ✅ Hands won cannot exceed roundNumber
@@ -651,9 +669,38 @@ The scoring table is based on the rule: `points = call * 5 + 5`
 
 ### Trump Card Implementation
 
+**How Trump Works in Physical Game:**
+- Dealer shuffles and deals cards to all players (Round N = N cards per player)
+- After dealing, dealer flips the **top card of the remaining deck** face-up
+- This card becomes the trump suit for that round
+- **Key rule**: Trump card is NOT in any player's hand (it's from undealt cards)
+- **Example**: Round 3 with 4 players = 12 cards dealt, trump is the 13th card
+
+**Cards Remaining Calculator:**
+```typescript
+function getCardsRemaining(roundNumber: number, numberOfPlayers: number) {
+  const totalCards = 52;
+  const cardsDealt = roundNumber * numberOfPlayers;
+  return totalCards - cardsDealt;
+}
+
+// Examples:
+// Round 1, 4 players: 52 - 4 = 48 cards remain
+// Round 5, 3 players: 52 - 15 = 37 cards remain
+// Round 10, 4 players: 52 - 40 = 12 cards remain
+// Round 13, 4 players: 52 - 52 = 0 cards remain (NO TRUMP!)
+```
+
 **Auto-Generation Algorithm:**
 ```typescript
-function generateRandomTrump() {
+function generateRandomTrump(roundNumber: number, numberOfPlayers: number) {
+  const cardsRemaining = 52 - (roundNumber * numberOfPlayers);
+
+  // Check if there are cards left for trump
+  if (cardsRemaining < 1) {
+    return null; // No trump this round
+  }
+
   const suits = ['hearts', 'diamonds', 'clubs', 'spades'];
   const ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
 
@@ -676,24 +723,35 @@ function generateRandomTrump() {
 }
 ```
 
+**Note on Auto-Generation:**
+- The app generates a random trump card as a **simulation** to speed up gameplay
+- This is NOT perfectly accurate (might theoretically pick a card in someone's hand)
+- **The app doesn't know what cards players actually have in the physical game**
+- This is why dealer override is important!
+
 **Dealer Override Flow:**
 1. Round starts → Auto-generate trump → Display to user
-2. Dealer taps "Change Trump" button
-3. Modal opens with card picker (suit + rank selectors)
-4. Dealer selects actual trump from physical game
-5. Save with `wasAutoAssigned: false`
-6. Display updated trump card
+2. Dealer looks at actual trump from physical deck
+3. If different, dealer taps "Change Trump" button
+4. Modal opens with card picker (suit + rank selectors)
+5. Dealer selects the ACTUAL trump card from physical game
+6. Save with `wasAutoAssigned: false`
+7. Display updated trump card
 
 **Why Both Auto and Manual?**
-- **Auto**: Speeds up digital-only games or when dealer forgets to check
-- **Manual override**: Ensures accuracy for serious games following physical cards
-- **Flexibility**: Works for both casual and competitive play styles
+- **Auto-generation**: Speeds up digital-only games or practice games
+- **Dealer override (RECOMMENDED)**: Ensures accuracy for serious games with physical cards
+- **Best practice**: Dealer should always verify and update trump to match physical deck
+- **Edge cases**: Some rounds may have no trump (when entire deck is dealt)
 
 ### Game Rules Summary
 1. Deal increases each round (1 card → 13 cards)
-2. Trump determined by next card after dealing
-   - App auto-generates random trump card
-   - Dealer can override to match physical game
+2. **Trump determined by top card of remaining deck AFTER dealing**
+   - In physical game: Dealer deals cards to all players, then flips top card of remaining deck as trump
+   - **IMPORTANT**: Trump card cannot be in any player's hand (it's from the undealt cards)
+   - **In app**: Auto-generates random trump as simulation
+   - **Dealer override**: Dealer should change trump to match actual card from physical deck
+   - **Edge case**: In high rounds with many players, entire deck may be dealt (no trump card)
 3. Players call starting clockwise from dealer
 4. **🚨 CRITICAL VALIDATION**: Total calls ≠ round number (enforced on dealer)
    - Sum of all calls must NOT equal the number of cards dealt
@@ -771,13 +829,20 @@ mmkv.set('onboarding_completed', true)
 ## ✅ Design Decisions
 
 ### 1. Trump Card
-**Decision**: Auto-assign with dealer override
-- **Default behavior**: App randomly generates trump card when round starts
-- **Dealer override**: Dealer can change to match actual trump from physical game
-- **Why auto-assign?** Reduces manual entry, speeds up gameplay
-- **Why allow override?** Ensures accuracy when physical trump differs
-- **Tracking**: Stores trump card and whether it was auto-assigned or manually set
-- **Display**: Visual card representation with suit symbols (♥♦♣♠)
+**Decision**: Auto-assign with dealer override (simulation + accuracy)
+- **How trump works in real game**:
+  - After dealing cards to players, dealer flips top card of remaining deck as trump
+  - Trump card is NEVER in any player's hand (it's from undealt cards)
+  - In some rounds, entire deck is dealt → no trump card exists
+- **App behavior**:
+  - Auto-generates random trump when round starts (simulation for speed)
+  - Checks if cards remain after dealing (52 - roundNumber × players)
+  - Returns null if no cards remain for trump
+- **Dealer override (RECOMMENDED)**:
+  - Dealer should verify and update to match ACTUAL trump from physical deck
+  - This ensures accuracy since app doesn't know which cards players hold
+- **Tracking**: Stores trump card, whether auto-assigned, and handles null case
+- **Display**: Visual card representation with suit symbols (♥♦♣♠) or "No Trump" message
 
 ### 2. UI Flow
 **Decision**: Single screen with mode switching
