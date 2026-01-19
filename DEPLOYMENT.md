@@ -4,7 +4,7 @@ This guide covers deploying the Rung Score Keeper app to Netlify.
 
 ## Prerequisites
 
-- Node.js 18+ installed
+- Node.js 20+ installed
 - Netlify account (free tier works)
 - Git repository pushed to GitHub
 
@@ -19,7 +19,7 @@ This guide covers deploying the Rung Score Keeper app to Netlify.
 2. **Configure Build Settings**
    - **Build command**: `npm run build:web`
    - **Publish directory**: `dist`
-   - **Node version**: 18 (automatically detected from `.nvmrc`)
+   - **Node version**: 20 (automatically detected from `.nvmrc`)
 
 3. **Deploy**
    - Click "Deploy site"
@@ -68,8 +68,11 @@ The repository includes:
   - Build command: `npm run build:web`
   - Publish directory: `dist`
   - SPA redirect rules (/* → /index.html)
+  - Node version: 20
 
-- **`.nvmrc`**: Node version specification (18)
+- **`.nvmrc`**: Node version specification (20)
+
+- **`.npmrc`**: npm configuration for legacy peer dependencies
 
 ## Environment Variables
 
@@ -87,7 +90,7 @@ The build uses:
 - **Framework**: Expo (React Native Web)
 - **Build command**: `npm run build:web`
 - **Output**: Static HTML/JS/CSS in `dist/`
-- **Node version**: 18
+- **Node version**: 20
 
 ## Continuous Deployment
 
