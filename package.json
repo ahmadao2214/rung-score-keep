@@ -13,6 +13,7 @@
     "@expo/metro-runtime": "^6.1.2",
     "@tamagui/config": "^1.144.2",
     "@tamagui/core": "^1.144.2",
+    "@tamagui/shorthands": "^1.144.2",
     "convex": "^1.31.5",
     "expo": "~54.0.31",
     "expo-constants": "^18.0.13",
