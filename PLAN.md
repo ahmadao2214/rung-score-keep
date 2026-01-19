@@ -53,6 +53,14 @@ A cross-platform (web, iOS, Android) score keeping application for the card game
   gameId: Id<"games">,
   roundNumber: number, // 1-13 (number of cards dealt)
 
+  // Trump card tracking
+  trumpCard: {
+    suit: "hearts" | "diamonds" | "clubs" | "spades",
+    rank: "A" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "10" | "J" | "Q" | "K",
+    displayText: string, // e.g., "A♠", "7♥"
+    wasAutoAssigned: boolean, // true if auto-generated, false if dealer override
+  },
+
   // Player calls and results
   playerRounds: Array<{
     playerId: string,
@@ -106,7 +114,9 @@ components/
 │   ├── PlayingMode.tsx       # Hands won tracking UI
 │   ├── ScorecardMode.tsx     # Full game scorecard view
 │   ├── ScoreTable.tsx        # Reusable score table component
-│   └── RoundHeader.tsx       # Round number, dealer indicator
+│   ├── RoundHeader.tsx       # Round number, dealer indicator
+│   ├── TrumpCard.tsx         # Trump card display component
+│   └── TrumpCardPicker.tsx   # Trump card selector (for dealer override)
 └── setup/
     ├── PlayerSetup.tsx       # Player count + name inputs
     └── DealerSelector.tsx    # Dealer selection UI
@@ -126,8 +136,9 @@ lib/
 
 utils/
 ├── scoring.ts                # Scoring calculations
-├── validation.ts             # Game rule validations
-└── constants.ts              # Scoring table, etc.
+├── validation.ts             # Game rule validations (including total calls ≠ round number)
+├── trump.ts                  # Trump card generation and utilities
+└── constants.ts              # Scoring table, card suits/ranks, etc.
 ```
 
 ---
@@ -170,30 +181,77 @@ createGame({
 
 **UI Components:**
 - Round indicator (e.g., "Round 3 - 3 cards each")
+- **Trump card display** with dealer override option
+  - Auto-assigned trump shown (randomly generated)
+  - "Change Trump" button for dealer to override
+  - Visual card representation with suit symbol (♥♦♣♠)
 - Player list with call entry
 - Current player highlight (shows whose turn to call)
-- Call validation message
+- Call validation message (see validation rules below)
 - "Start Playing" button (after all calls entered)
 
-**Note:** Trump card is handled during physical gameplay and not tracked in app
+**Trump Card Assignment:**
+- **Auto-assign**: When round starts, app randomly generates trump card
+- **Dealer override**: Dealer can tap "Change Trump" to select actual trump from physical game
+- Stores both the trump card and whether it was auto-assigned or manually set
 
 **Key Logic:**
 - Players call in clockwise order starting from player after dealer
 - Dealer calls last
-- **Validation Rule**: Total calls ≠ round number
-  - If dealer's turn and calls would equal round number, show error
-  - Force dealer to choose different call
+- **CRITICAL VALIDATION RULE**: Total calls cannot equal round number
 
-**Example Validation:**
+**🚨 VALIDATION RULE: Total Calls ≠ Round Number**
+
+This is the most important validation rule in Rung. The sum of all player calls MUST NOT equal the number of cards dealt (round number).
+
+**Why?** This ensures that someone will always fail to make their exact call, preventing ties.
+
+**How it works:**
+- As each player makes their call, sum is calculated
+- When it's the dealer's turn (last to call), check if their call would make total = round number
+- If yes, show error and prevent that call
+- Dealer must choose a different number
+
+**Examples:**
+
+**Example 1 - Round 1 (1 card each), 4 players:**
 ```
-Round 1 (1 card each), 4 players:
-P1 calls: 1
-P2 calls: 0
-P3 calls: 0
-P4 (dealer) tries to call: 0 ❌
-  → Total would be 1, which equals round number
-  → Must call 1 instead
+P1 calls: 1  → Total: 1
+P2 calls: 0  → Total: 1
+P3 calls: 0  → Total: 1
+P4 (dealer) tries: 0 ❌
+  → Total would be 1, which EQUALS round number (1)
+  → INVALID! Dealer must call 1 instead
 ```
+
+**Example 2 - Round 5 (5 cards each), 3 players:**
+```
+P1 calls: 2  → Total: 2
+P2 calls: 3  → Total: 5
+P3 (dealer) tries: 0 ❌
+  → Total would be 5, which EQUALS round number (5)
+  → INVALID! Dealer must call any number except 0
+
+P3 (dealer) calls: 1 ✅
+  → Total is 6, which does NOT equal 5
+  → VALID!
+```
+
+**Example 3 - Round 7 (7 cards each), 4 players:**
+```
+P1 calls: 2  → Total: 2
+P2 calls: 1  → Total: 3
+P3 calls: 3  → Total: 6
+P4 (dealer) tries: 1 ❌
+  → Total would be 7, which EQUALS round number (7)
+  → INVALID! Dealer can call 0, 2, 3, 4, 5, 6, or 7 (anything except 1)
+```
+
+**UI Implementation:**
+- Show running total as players enter calls
+- When dealer's turn, highlight invalid options
+- Display error message: "Total calls cannot equal {roundNumber}. Please choose a different call."
+- Visually disable/highlight the forbidden call option
 
 **Convex Mutation:**
 ```typescript
@@ -343,22 +401,34 @@ completeRound({
 - [ ] Configure offline sync architecture
 
 ### Phase 2: Data Layer 📊
-- [ ] Define Convex schema (games, rounds tables)
+- [ ] Define Convex schema (games, rounds tables with trump card)
 - [ ] Create game mutations (create, update, delete)
-- [ ] Create round mutations (create, update calls, update results)
+- [ ] Create round mutations (create, update calls, update results, update trump)
 - [ ] Implement scoring calculation functions
 - [ ] Create validation utilities
+  - [ ] Validate total calls ≠ round number
+  - [ ] Calculate forbidden call for dealer
+  - [ ] Validate call ranges (0 to roundNumber)
+- [ ] Implement trump card utilities
+  - [ ] Random trump generation function
+  - [ ] Trump card formatting (display text with symbols)
 - [ ] Set up MMKV storage layer and hooks
 - [ ] Implement offline mutation queue
 - [ ] Create sync utilities (MMKV ↔ Convex)
 - [ ] Write unit tests for scoring logic
+- [ ] Write unit tests for validation logic (especially total calls ≠ round number)
 - [ ] Set up Convex dev environment
 
 ### Phase 3: Core UI Components 🎨
 - [ ] Create base Tamagui components (Button, Card, Input)
 - [ ] Build PlayerCard component
 - [ ] Build ScoreTable component (scrollable)
+- [ ] Build TrumpCard display component (with suit symbols)
+- [ ] Build TrumpCardPicker modal (suit + rank selectors)
 - [ ] Build CallingMode component with validation
+  - [ ] Add running total display
+  - [ ] Implement dealer call validation (total ≠ round number)
+  - [ ] Visual feedback for invalid calls
 - [ ] Build PlayingMode component
 - [ ] Build ScorecardMode component
 - [ ] Create loading and error states
@@ -376,12 +446,21 @@ completeRound({
 - [ ] Add animations/transitions
 
 ### Phase 5: Calling Phase 📞
+- [ ] Implement auto-trump generation when round starts
+- [ ] Display trump card with visual card representation
+- [ ] Add "Change Trump" button and modal picker
 - [ ] Implement turn-based call entry
+- [ ] Show running total of calls as players enter them
 - [ ] Add dealer validation logic (total calls ≠ round number)
+  - [ ] Calculate and highlight forbidden call option
+  - [ ] Show clear error message when dealer tries invalid call
 - [ ] Visual feedback for current player
 - [ ] Error messages for invalid calls
 - [ ] Connect to Convex mutations with offline queue
-- [ ] Test validation edge cases
+- [ ] Test validation edge cases thoroughly
+  - [ ] Test all round numbers (1-13)
+  - [ ] Test different player counts (2-8)
+  - [ ] Test edge case where dealer has multiple invalid options
 
 ### Phase 6: Playing Phase 🃏
 - [ ] Build hands won tracking UI
@@ -477,10 +556,14 @@ completeRound({
 - ✅ Must select valid dealer (0 to players-1)
 
 ### Calling Phase
-- ✅ Calls must be 0 to roundNumber
-- ✅ Total calls cannot equal roundNumber
-- ✅ Dealer validation enforced last
+- ✅ Calls must be 0 to roundNumber (e.g., in round 5, calls can be 0-5)
+- ✅ **CRITICAL**: Total calls cannot equal roundNumber (enforced on dealer)
+  - Sum of all player calls ≠ round number
+  - Example: Round 5 with 3 players - if P1=2, P2=3, then P3 cannot call 0 (total would be 5)
+- ✅ Dealer validation enforced last (dealer calls after all other players)
 - ✅ Cannot proceed until all calls entered
+- ✅ Show running total of calls as players enter them
+- ✅ Visually indicate forbidden call option for dealer
 
 ### Playing Phase
 - ✅ Hands won cannot exceed roundNumber
@@ -566,14 +649,58 @@ The scoring table is based on the rule: `points = call * 5 + 5`
 - Call 2 → 15 points
 - ...and so on
 
+### Trump Card Implementation
+
+**Auto-Generation Algorithm:**
+```typescript
+function generateRandomTrump() {
+  const suits = ['hearts', 'diamonds', 'clubs', 'spades'];
+  const ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+
+  const suit = suits[Math.floor(Math.random() * suits.length)];
+  const rank = ranks[Math.floor(Math.random() * ranks.length)];
+
+  const suitSymbols = {
+    hearts: '♥',
+    diamonds: '♦',
+    clubs: '♣',
+    spades: '♠',
+  };
+
+  return {
+    suit,
+    rank,
+    displayText: `${rank}${suitSymbols[suit]}`,
+    wasAutoAssigned: true,
+  };
+}
+```
+
+**Dealer Override Flow:**
+1. Round starts → Auto-generate trump → Display to user
+2. Dealer taps "Change Trump" button
+3. Modal opens with card picker (suit + rank selectors)
+4. Dealer selects actual trump from physical game
+5. Save with `wasAutoAssigned: false`
+6. Display updated trump card
+
+**Why Both Auto and Manual?**
+- **Auto**: Speeds up digital-only games or when dealer forgets to check
+- **Manual override**: Ensures accuracy for serious games following physical cards
+- **Flexibility**: Works for both casual and competitive play styles
+
 ### Game Rules Summary
 1. Deal increases each round (1 card → 13 cards)
-2. Trump determined by next card after dealing (not tracked in app)
+2. Trump determined by next card after dealing
+   - App auto-generates random trump card
+   - Dealer can override to match physical game
 3. Players call starting clockwise from dealer
-4. **Critical validation**: Total calls ≠ cards in hand (enforced on dealer)
+4. **🚨 CRITICAL VALIDATION**: Total calls ≠ round number (enforced on dealer)
+   - Sum of all calls must NOT equal the number of cards dealt
+   - Prevents situations where everyone makes their call
 5. Points awarded only if actual hands = called hands
 6. Game ends after 13 rounds
-7. Scorer tracks calls and results only (trump handled during physical gameplay)
+7. Scorer tracks calls, results, and trump card
 
 ---
 
@@ -624,7 +751,12 @@ mmkv.set('onboarding_completed', true)
 ### MVP Complete When:
 - ✅ Can create new game with 2-8 players
 - ✅ Can complete full game (rounds 1-13)
+- ✅ Trump card auto-generates and displays correctly
+- ✅ Dealer can override trump card to match physical game
 - ✅ All validation rules enforced correctly
+  - ✅ **CRITICAL**: Total calls ≠ round number validation works for all scenarios
+  - ✅ Dealer cannot make forbidden call
+  - ✅ Clear error messages guide user
 - ✅ Scoring calculated accurately
 - ✅ Scorecard displays correctly on all platforms
 - ✅ Data persists locally (MMKV) and syncs to Convex
@@ -639,10 +771,13 @@ mmkv.set('onboarding_completed', true)
 ## ✅ Design Decisions
 
 ### 1. Trump Card
-**Decision**: Not tracked in app
-- Players handle trump during physical gameplay
-- Keeps app focused on score keeping
-- Reduces data entry burden on scorer
+**Decision**: Auto-assign with dealer override
+- **Default behavior**: App randomly generates trump card when round starts
+- **Dealer override**: Dealer can change to match actual trump from physical game
+- **Why auto-assign?** Reduces manual entry, speeds up gameplay
+- **Why allow override?** Ensures accuracy when physical trump differs
+- **Tracking**: Stores trump card and whether it was auto-assigned or manually set
+- **Display**: Visual card representation with suit symbols (♥♦♣♠)
 
 ### 2. UI Flow
 **Decision**: Single screen with mode switching
