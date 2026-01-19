@@ -1,39 +1,90 @@
-# Convex Backend Setup
+# Welcome to your Convex functions directory!
 
-## Initial Setup
+Write your Convex functions here.
+See https://docs.convex.dev/functions for more.
 
-To initialize Convex for this project, run:
+A query function that takes two arguments looks like:
 
-```bash
-npx convex dev
+```ts
+// convex/myFunctions.ts
+import { query } from "./_generated/server";
+import { v } from "convex/values";
+
+export const myQueryFunction = query({
+  // Validators for arguments.
+  args: {
+    first: v.number(),
+    second: v.string(),
+  },
+
+  // Function implementation.
+  handler: async (ctx, args) => {
+    // Read the database as many times as you need here.
+    // See https://docs.convex.dev/database/reading-data.
+    const documents = await ctx.db.query("tablename").collect();
+
+    // Arguments passed from the client are properties of the args object.
+    console.log(args.first, args.second);
+
+    // Write arbitrary JavaScript here: filter, aggregate, build derived data,
+    // remove non-public properties, or create new objects.
+    return documents;
+  },
+});
 ```
 
-This will:
-1. Create a new Convex deployment
-2. Generate a `.env.local` file with your deployment URL
-3. Start the Convex development server
+Using this query function in a React component looks like:
 
-## Environment Variables
-
-After running `npx convex dev`, you'll have a `.env.local` file with:
-
-```
-CONVEX_DEPLOYMENT=dev:...
-CONVEX_URL=https://...
+```ts
+const data = useQuery(api.myFunctions.myQueryFunction, {
+  first: 10,
+  second: "hello",
+});
 ```
 
-Make sure to add `.env.local` to your `.gitignore` (it should already be there).
+A mutation function looks like:
 
-## Deploying to Production
+```ts
+// convex/myFunctions.ts
+import { mutation } from "./_generated/server";
+import { v } from "convex/values";
 
-When ready to deploy:
+export const myMutationFunction = mutation({
+  // Validators for arguments.
+  args: {
+    first: v.string(),
+    second: v.string(),
+  },
 
-```bash
-npx convex deploy
+  // Function implementation.
+  handler: async (ctx, args) => {
+    // Insert or modify documents in the database here.
+    // Mutations can also read from the database like queries.
+    // See https://docs.convex.dev/database/writing-data.
+    const message = { body: args.first, author: args.second };
+    const id = await ctx.db.insert("messages", message);
+
+    // Optionally, return a value from your mutation.
+    return await ctx.db.get("messages", id);
+  },
+});
 ```
 
-## File Structure
+Using this mutation function in a React component looks like:
 
-- `schema.ts` - Database schema definitions
-- `games.ts` - Game-related mutations and queries
-- `rounds.ts` - Round-related mutations and queries
+```ts
+const mutation = useMutation(api.myFunctions.myMutationFunction);
+function handleButtonPress() {
+  // fire and forget, the most common way to use mutations
+  mutation({ first: "Hello!", second: "me" });
+  // OR
+  // use the result once the mutation has completed
+  mutation({ first: "Hello!", second: "me" }).then((result) =>
+    console.log(result),
+  );
+}
+```
+
+Use the Convex CLI to push your functions to a deployment. See everything
+the Convex CLI can do by running `npx convex -h` in your project root
+directory. To learn more, launch the docs with `npx convex docs`.
