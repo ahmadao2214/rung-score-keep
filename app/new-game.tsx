@@ -28,7 +28,7 @@ function generateJoinCode(): string {
 export default function NewGame() {
   const router = useRouter();
   const { colors } = useTheme();
-  const [setupMode, setSetupMode] = useState<'choose' | 'manual' | 'qr'>('choose');
+  const [setupMode, setSetupMode] = useState<'choose' | 'manual' | 'qr' | 'qr-scorekeeper'>('choose');
   const [numberOfPlayers, setNumberOfPlayers] = useState(4);
   const [playerNames, setPlayerNames] = useState<string[]>(
     Array(4).fill('').map((_, i) => `Player ${i + 1}`)
@@ -39,9 +39,18 @@ export default function NewGame() {
   const [emojiPickerIndex, setEmojiPickerIndex] = useState<number | null>(null);
   const [isCreating, setIsCreating] = useState(false);
 
+  // QR mode: scorekeeper info
+  const [scorekeeperName, setScorekeeperName] = useState('');
+  const [scorekeeperEmoji, setScorekeeperEmoji] = useState('😊');
+  const [showScorekeeperEmojiPicker, setShowScorekeeperEmojiPicker] = useState(false);
+
   // Convex mutations (only loaded if Convex is configured)
   const createLobby = isConvexConfigured()
     ? require('convex/react').useMutation(require('../convex/_generated/api').api.games.createLobby)
+    : null;
+
+  const joinLobby = isConvexConfigured()
+    ? require('convex/react').useMutation(require('../convex/_generated/api').api.games.joinLobby)
     : null;
 
   const handlePlayerCountChange = (count: number) => {
@@ -111,19 +120,39 @@ export default function NewGame() {
   };
 
   const handleStartGameQR = async () => {
+    // Validate scorekeeper name
+    if (!scorekeeperName.trim()) {
+      setErrors({ general: 'Please enter your name' });
+      Alert.alert('Validation Error', 'Please enter your name as the scorekeeper');
+      return;
+    }
+
     setIsCreating(true);
     setErrors({});
 
     try {
-      if (isConvexConfigured() && createLobby) {
+      if (isConvexConfigured() && createLobby && joinLobby) {
         // Use Convex for cross-device multiplayer
         const result = await createLobby({ numberOfPlayers });
+
+        // Add scorekeeper as the first player
+        await joinLobby({
+          joinCode: result.joinCode,
+          playerName: scorekeeperName.trim(),
+          playerEmoji: scorekeeperEmoji,
+          deviceId: `host_${Date.now()}`,
+        });
 
         // Store game info locally for quick access
         const game = {
           id: result.gameId,
           numberOfPlayers,
-          players: [],
+          players: [{
+            id: `player_${Date.now()}_0`,
+            name: scorekeeperName.trim(),
+            position: 0,
+            emoji: scorekeeperEmoji,
+          }],
           dealerIndex: 0,
           currentRound: 1,
           status: 'lobby',
@@ -139,7 +168,12 @@ export default function NewGame() {
         const game = {
           id: `game_${Date.now()}`,
           numberOfPlayers,
-          players: [],
+          players: [{
+            id: `player_${Date.now()}_0`,
+            name: scorekeeperName.trim(),
+            position: 0,
+            emoji: scorekeeperEmoji,
+          }],
           dealerIndex: 0,
           currentRound: 1,
           status: 'lobby',
@@ -175,12 +209,12 @@ export default function NewGame() {
 
         <Pressable
           style={styles.setupOptionCard}
-          onPress={() => setSetupMode('qr')}
+          onPress={() => setSetupMode('qr-scorekeeper')}
         >
           <Text style={styles.setupEmoji}>📱</Text>
           <Text style={styles.setupTitle}>Join with QR Code</Text>
           <Text style={styles.setupDescription}>
-            Players scan a QR code and enter their own names
+            You and other players join via QR code
           </Text>
           <View style={styles.recommendedBadge}>
             <Text style={styles.recommendedText}>Recommended</Text>
@@ -201,8 +235,8 @@ export default function NewGame() {
     );
   }
 
-  // QR setup mode - just select number of players
-  if (setupMode === 'qr') {
+  // QR setup mode - scorekeeper enters their info first
+  if (setupMode === 'qr-scorekeeper') {
     return (
       <ScrollView
         style={styles.scrollContainer}
@@ -213,11 +247,118 @@ export default function NewGame() {
             <Text style={styles.backButtonText}>← Back</Text>
           </Pressable>
           <Text style={styles.title}>QR Code Setup</Text>
-          <Text style={styles.subtitle}>Choose number of players</Text>
+          <Text style={styles.subtitle}>Enter your details</Text>
+        </View>
+
+        <View style={styles.infoCard}>
+          <Text style={styles.infoTitle}>You're a player too!</Text>
+          <Text style={styles.infoText}>
+            As the scorekeeper, you're also playing. Enter your name and emoji below.
+          </Text>
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Number of Players</Text>
+          <Text style={styles.sectionTitle}>Choose Your Emoji</Text>
+          <Pressable
+            style={styles.emojiButton}
+            onPress={() => setShowScorekeeperEmojiPicker(true)}
+          >
+            <Text style={styles.emojiButtonText}>{scorekeeperEmoji}</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Your Name</Text>
+          {errors.general && (
+            <Text style={styles.errorText}>{errors.general}</Text>
+          )}
+          <View style={styles.nameInputContainer}>
+            <TextInput
+              value={scorekeeperName}
+              onChangeText={(text) => {
+                setScorekeeperName(text);
+                setErrors({});
+              }}
+              placeholder="Enter your name"
+              placeholderTextColor={colors.textMuted}
+              style={styles.textInput}
+              autoCapitalize="words"
+              autoFocus
+            />
+          </View>
+        </View>
+
+        <Pressable
+          style={[styles.startButton, !scorekeeperName.trim() && styles.startButtonDisabled]}
+          onPress={() => {
+            if (!scorekeeperName.trim()) {
+              setErrors({ general: 'Please enter your name' });
+              return;
+            }
+            setSetupMode('qr');
+          }}
+          disabled={!scorekeeperName.trim()}
+        >
+          <Text style={styles.startButtonText}>Next: Select Total Players</Text>
+        </Pressable>
+
+        {/* Scorekeeper Emoji Picker Modal */}
+        <Modal
+          visible={showScorekeeperEmojiPicker}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowScorekeeperEmojiPicker(false)}
+        >
+          <Pressable
+            style={styles.modalOverlay}
+            onPress={() => setShowScorekeeperEmojiPicker(false)}
+          >
+            <View style={styles.emojiPicker}>
+              <Text style={styles.emojiPickerTitle}>Choose your emoji</Text>
+              <View style={styles.emojiGrid}>
+                {PLAYER_EMOJIS.map((emoji) => (
+                  <Pressable
+                    key={emoji}
+                    style={[
+                      styles.emojiOption,
+                      scorekeeperEmoji === emoji && styles.emojiOptionSelected,
+                    ]}
+                    onPress={() => {
+                      setScorekeeperEmoji(emoji);
+                      setShowScorekeeperEmojiPicker(false);
+                    }}
+                  >
+                    <Text style={styles.emojiOptionText}>{emoji}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          </Pressable>
+        </Modal>
+      </ScrollView>
+    );
+  }
+
+  // QR setup mode - select total number of players (including scorekeeper)
+  if (setupMode === 'qr') {
+    return (
+      <ScrollView
+        style={styles.scrollContainer}
+        contentContainerStyle={styles.container}
+      >
+        <View style={styles.header}>
+          <Pressable onPress={() => setSetupMode('qr-scorekeeper')} style={styles.backButton}>
+            <Text style={styles.backButtonText}>← Back</Text>
+          </Pressable>
+          <Text style={styles.title}>QR Code Setup</Text>
+          <Text style={styles.subtitle}>Total players (including you)</Text>
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Total Number of Players</Text>
+          <Text style={styles.sectionSubtitle}>
+            You're already player #1. How many total?
+          </Text>
           <View style={styles.countRow}>
             {[2, 3, 4, 5, 6].map((count) => (
               <TouchableOpacity
@@ -243,11 +384,11 @@ export default function NewGame() {
         </View>
 
         <View style={styles.infoCard}>
-          <Text style={styles.infoTitle}>Next Steps:</Text>
+          <Text style={styles.infoTitle}>What happens next:</Text>
           <Text style={styles.infoText}>
-            1. You'll see a QR code{'\n'}
-            2. Each player scans it{'\n'}
-            3. They enter their name and choose an emoji{'\n'}
+            1. You'll see a QR code in the lobby{'\n'}
+            2. {numberOfPlayers - 1} more {numberOfPlayers - 1 === 1 ? 'player scans' : 'players scan'} the code{'\n'}
+            3. They enter their name and emoji{'\n'}
             4. Start the game once everyone joins
           </Text>
         </View>
