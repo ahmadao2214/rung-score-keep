@@ -1,5 +1,5 @@
 [build]
-  command = "npm run build:web"
+  command = "npx convex deploy --cmd 'npm run build:web'"
   publish = "dist"
 
 [build.environment]
