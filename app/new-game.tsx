@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { ScrollView, Pressable, Alert, StyleSheet, TextInput, View, Text, TouchableOpacity, Modal } from 'react-native';
+import { ScrollView, Pressable, Alert, StyleSheet, TextInput, View, Text, TouchableOpacity, Modal, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { validatePlayerNames, isValidPlayerCount, isValidDealerIndex } from '../utils/validation';
 import { storageHelpers, StorageKeys } from '../lib/mmkv';
 import { useTheme } from '../lib/theme';
+import { isConvexConfigured } from '../lib/convex';
 
 const PLAYER_EMOJIS = [
   '😊', '😎', '🤓', '🥳', '😈', '👻', '🤖', '👽',
@@ -36,6 +37,12 @@ export default function NewGame() {
   const [dealerIndex, setDealerIndex] = useState(0);
   const [errors, setErrors] = useState<{ players?: string; general?: string }>({});
   const [emojiPickerIndex, setEmojiPickerIndex] = useState<number | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
+
+  // Convex mutations (only loaded if Convex is configured)
+  const createLobby = isConvexConfigured()
+    ? require('convex/react').useMutation(require('../convex/_generated/api').api.games.createLobby)
+    : null;
 
   const handlePlayerCountChange = (count: number) => {
     if (!isValidPlayerCount(count)) return;
@@ -103,22 +110,53 @@ export default function NewGame() {
     router.push(`/game/${game.id}`);
   };
 
-  const handleStartGameQR = () => {
-    // Create game with empty player slots - players will join via QR
-    const game = {
-      id: `game_${Date.now()}`,
-      numberOfPlayers,
-      players: [], // Empty - players join via QR
-      dealerIndex: 0, // Will be selected in lobby
-      currentRound: 1,
-      status: 'lobby', // New status for waiting room
-      createdAt: Date.now(),
-      joinCode: generateJoinCode(),
-      playerSessions: [],
-    };
+  const handleStartGameQR = async () => {
+    setIsCreating(true);
+    setErrors({});
 
-    storageHelpers.setObject(StorageKeys.CURRENT_GAME, game);
-    router.push(`/game/${game.id}`);
+    try {
+      if (isConvexConfigured() && createLobby) {
+        // Use Convex for cross-device multiplayer
+        const result = await createLobby({ numberOfPlayers });
+
+        // Store game info locally for quick access
+        const game = {
+          id: result.gameId,
+          numberOfPlayers,
+          players: [],
+          dealerIndex: 0,
+          currentRound: 1,
+          status: 'lobby',
+          createdAt: Date.now(),
+          joinCode: result.joinCode,
+          playerSessions: [],
+        };
+
+        storageHelpers.setObject(StorageKeys.CURRENT_GAME, game);
+        router.push(`/game/${result.gameId}`);
+      } else {
+        // Fallback to local storage (offline mode)
+        const game = {
+          id: `game_${Date.now()}`,
+          numberOfPlayers,
+          players: [],
+          dealerIndex: 0,
+          currentRound: 1,
+          status: 'lobby',
+          createdAt: Date.now(),
+          joinCode: generateJoinCode(),
+          playerSessions: [],
+        };
+
+        storageHelpers.setObject(StorageKeys.CURRENT_GAME, game);
+        router.push(`/game/${game.id}`);
+      }
+    } catch (error: any) {
+      setErrors({ general: error.message || 'Failed to create lobby' });
+      Alert.alert('Error', error.message || 'Failed to create lobby');
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   const styles = createStyles(colors);
@@ -214,8 +252,16 @@ export default function NewGame() {
           </Text>
         </View>
 
-        <Pressable style={styles.startButton} onPress={handleStartGameQR}>
-          <Text style={styles.startButtonText}>Create Game & Show QR</Text>
+        <Pressable
+          style={[styles.startButton, isCreating && styles.startButtonDisabled]}
+          onPress={handleStartGameQR}
+          disabled={isCreating}
+        >
+          {isCreating ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <Text style={styles.startButtonText}>Create Game & Show QR</Text>
+          )}
         </Pressable>
       </ScrollView>
     );
@@ -539,6 +585,9 @@ const createStyles = (colors: any) => StyleSheet.create({
     borderRadius: 14,
     alignItems: 'center',
     marginTop: 8,
+  },
+  startButtonDisabled: {
+    opacity: 0.5,
   },
   startButtonText: {
     color: '#FFFFFF',

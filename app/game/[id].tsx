@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { LobbyMode } from '../../components/game/LobbyMode';
 import { CallingMode } from '../../components/game/CallingMode';
@@ -8,6 +8,7 @@ import { ScorecardMode } from '../../components/game/ScorecardMode';
 import { storageHelpers, StorageKeys } from '../../lib/mmkv';
 import { TrumpCard as TrumpCardType } from '../../utils/trump';
 import { useTheme } from '../../lib/theme';
+import { isConvexConfigured } from '../../lib/convex';
 
 type GameMode = 'lobby' | 'calling' | 'playing' | 'scorecard';
 
@@ -62,18 +63,51 @@ export default function Game() {
 
   const styles = createStyles(colors);
 
+  // Convex hooks (only when configured)
+  const convexGame = isConvexConfigured()
+    ? require('convex/react').useQuery(
+        require('../../convex/_generated/api').api.games.getGame,
+        { gameId: id }
+      )
+    : undefined;
+
+  const startGameFromLobby = isConvexConfigured()
+    ? require('convex/react').useMutation(
+        require('../../convex/_generated/api').api.games.startGameFromLobby
+      )
+    : null;
+
   useEffect(() => {
-    const savedGame = storageHelpers.getObject<Game>(StorageKeys.CURRENT_GAME);
+    // Use Convex data if available, otherwise fall back to local storage
+    if (isConvexConfigured() && convexGame !== undefined) {
+      if (convexGame === null) {
+        // Game not found in Convex
+        router.replace('/');
+        setLoading(false);
+        return;
+      }
 
-    if (savedGame) {
-      setGame(savedGame);
+      // Map Convex game to our Game interface
+      const mappedGame: Game = {
+        id: convexGame._id,
+        numberOfPlayers: convexGame.numberOfPlayers,
+        players: convexGame.players,
+        dealerIndex: convexGame.dealerIndex,
+        currentRound: convexGame.currentRound,
+        status: convexGame.status,
+        createdAt: convexGame.createdAt,
+        joinCode: convexGame.joinCode,
+        playerSessions: convexGame.playerSessions,
+      };
 
-      // Check if we're in lobby mode
-      if (savedGame.status === 'lobby') {
+      setGame(mappedGame);
+
+      // Determine mode based on status
+      if (mappedGame.status === 'lobby') {
         setMode('lobby');
       } else {
-        const rounds = savedGame.rounds || [];
-        const currentRoundData = rounds.find(r => r.roundNumber === savedGame.currentRound);
+        const rounds = mappedGame.rounds || [];
+        const currentRoundData = rounds.find(r => r.roundNumber === mappedGame.currentRound);
 
         if (!currentRoundData) {
           setMode('calling');
@@ -86,32 +120,74 @@ export default function Game() {
         }
       }
 
-      if (savedGame.id !== id) {
-        router.replace(`/game/${savedGame.id}`);
-      }
+      setLoading(false);
     } else {
-      router.replace('/');
+      // Fall back to local storage when Convex is not configured
+      const savedGame = storageHelpers.getObject<Game>(StorageKeys.CURRENT_GAME);
+
+      if (savedGame) {
+        setGame(savedGame);
+
+        // Check if we're in lobby mode
+        if (savedGame.status === 'lobby') {
+          setMode('lobby');
+        } else {
+          const rounds = savedGame.rounds || [];
+          const currentRoundData = rounds.find(r => r.roundNumber === savedGame.currentRound);
+
+          if (!currentRoundData) {
+            setMode('calling');
+          } else if (currentRoundData.status === 'calling') {
+            setMode('calling');
+          } else if (currentRoundData.status === 'playing') {
+            setMode('playing');
+          } else {
+            setMode('scorecard');
+          }
+        }
+
+        if (savedGame.id !== id) {
+          router.replace(`/game/${savedGame.id}`);
+        }
+        setLoading(false);
+      } else {
+        router.replace('/');
+        setLoading(false);
+      }
     }
-    setLoading(false);
-  }, [id, router]);
+  }, [id, router, convexGame]);
 
   const saveGame = (updatedGame: Game) => {
     setGame(updatedGame);
     storageHelpers.setObject(StorageKeys.CURRENT_GAME, updatedGame);
   };
 
-  const handleLobbyStart = (dealerIndex: number) => {
+  const handleLobbyStart = async (dealerIndex: number) => {
     if (!game) return;
 
-    // Update game status and dealer, then move to calling mode
-    const updatedGame = {
-      ...game,
-      dealerIndex,
-      status: 'in_progress',
-    };
+    try {
+      if (isConvexConfigured() && startGameFromLobby) {
+        // Use Convex to start the game (will trigger re-render via useQuery)
+        await startGameFromLobby({
+          gameId: game.id as any, // Convex ID type
+          dealerIndex,
+        });
+        // Mode will be updated automatically when convexGame updates
+      } else {
+        // Fall back to local storage
+        const updatedGame = {
+          ...game,
+          dealerIndex,
+          status: 'in_progress',
+        };
 
-    saveGame(updatedGame);
-    setMode('calling');
+        saveGame(updatedGame);
+        setMode('calling');
+      }
+    } catch (error: any) {
+      console.error('Failed to start game:', error);
+      alert(error.message || 'Failed to start game');
+    }
   };
 
   const handleCallingComplete = (
