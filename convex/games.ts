@@ -12,7 +12,137 @@ function generateJoinCode(): string {
 }
 
 /**
- * Create a new game with join code for QR sync
+ * Create a new lobby for QR-based player joining
+ */
+export const createLobby = mutation({
+  args: {
+    numberOfPlayers: v.number(),
+  },
+  handler: async (ctx, args) => {
+    if (args.numberOfPlayers < 2 || args.numberOfPlayers > 8) {
+      throw new Error('Number of players must be between 2 and 8');
+    }
+
+    // Generate unique join code
+    let joinCode = generateJoinCode();
+    let attempts = 0;
+    while (attempts < 10) {
+      const existing = await ctx.db
+        .query('games')
+        .withIndex('by_join_code', (q) => q.eq('joinCode', joinCode))
+        .first();
+      if (!existing || existing.status === 'completed') {
+        break;
+      }
+      joinCode = generateJoinCode();
+      attempts++;
+    }
+
+    const gameId = await ctx.db.insert('games', {
+      status: 'lobby',
+      createdAt: Date.now(),
+      numberOfPlayers: args.numberOfPlayers,
+      dealerIndex: 0, // Will be set when game starts
+      currentRound: 1,
+      players: [], // Empty - players join via QR
+      joinCode,
+      playerSessions: [],
+    });
+
+    return { gameId, joinCode };
+  },
+});
+
+/**
+ * Player joins lobby via QR code (adds themselves to the game)
+ */
+export const joinLobby = mutation({
+  args: {
+    joinCode: v.string(),
+    playerName: v.string(),
+    playerEmoji: v.string(),
+    deviceId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db
+      .query('games')
+      .withIndex('by_join_code', (q) => q.eq('joinCode', args.joinCode.toUpperCase()))
+      .first();
+
+    if (!game) {
+      throw new Error('Game not found');
+    }
+
+    if (game.status !== 'lobby') {
+      throw new Error('Game has already started');
+    }
+
+    if (game.players.length >= game.numberOfPlayers) {
+      throw new Error('Game is full');
+    }
+
+    // Check if name is already taken
+    if (game.players.some((p) => p.name.toLowerCase() === args.playerName.toLowerCase().trim())) {
+      throw new Error('Name is already taken');
+    }
+
+    const newPlayer = {
+      id: `player_${Date.now()}_${game.players.length}`,
+      name: args.playerName.trim(),
+      position: game.players.length,
+      emoji: args.playerEmoji,
+    };
+
+    const newSession = {
+      playerId: newPlayer.id,
+      joinedAt: Date.now(),
+      deviceId: args.deviceId,
+    };
+
+    await ctx.db.patch(game._id, {
+      players: [...game.players, newPlayer],
+      playerSessions: [...(game.playerSessions || []), newSession],
+    });
+
+    return { success: true, playerId: newPlayer.id };
+  },
+});
+
+/**
+ * Start game from lobby (transition to in_progress)
+ */
+export const startGameFromLobby = mutation({
+  args: {
+    gameId: v.id('games'),
+    dealerIndex: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found');
+
+    if (game.status !== 'lobby') {
+      throw new Error('Game is not in lobby status');
+    }
+
+    if (game.players.length !== game.numberOfPlayers) {
+      throw new Error('Not all players have joined yet');
+    }
+
+    if (args.dealerIndex < 0 || args.dealerIndex >= game.players.length) {
+      throw new Error('Invalid dealer index');
+    }
+
+    await ctx.db.patch(args.gameId, {
+      status: 'in_progress',
+      dealerIndex: args.dealerIndex,
+    });
+
+    return { success: true };
+  },
+});
+
+/**
+ * Create a new game with join code for QR sync (Manual setup flow)
  */
 export const createGame = mutation({
   args: {
@@ -169,6 +299,7 @@ export const updateGameStatus = mutation({
   args: {
     gameId: v.id('games'),
     status: v.union(
+      v.literal('lobby'),
       v.literal('setup'),
       v.literal('in_progress'),
       v.literal('completed')

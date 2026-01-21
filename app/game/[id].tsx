@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { LobbyMode } from '../../components/game/LobbyMode';
 import { CallingMode } from '../../components/game/CallingMode';
 import { PlayingMode } from '../../components/game/PlayingMode';
 import { ScorecardMode } from '../../components/game/ScorecardMode';
@@ -9,7 +10,7 @@ import { TrumpCard as TrumpCardType } from '../../utils/trump';
 import { useTheme } from '../../lib/theme';
 import { isConvexConfigured } from '../../lib/convex';
 
-type GameMode = 'calling' | 'playing' | 'scorecard';
+type GameMode = 'lobby' | 'calling' | 'playing' | 'scorecard';
 
 interface Player {
   id: string;
@@ -37,8 +38,6 @@ interface Round {
 
 interface Game {
   id: string;
-  convexId?: string;
-  joinCode?: string;
   numberOfPlayers: number;
   players: Player[];
   dealerIndex: number;
@@ -46,17 +45,12 @@ interface Game {
   status: string;
   createdAt: number;
   rounds?: Round[];
-}
-
-// Component that subscribes to Convex for real-time player join updates
-function ConvexGameSubscriber({ convexId, children }: { convexId: string; children: (joinedCount: number) => React.ReactNode }) {
-  const { useQuery } = require('convex/react');
-  const { api } = require('../../convex/_generated/api');
-
-  const convexGame = useQuery(api.games.getGame, { gameId: convexId });
-  const joinedCount = convexGame?.playerSessions?.length || 0;
-
-  return <>{children(joinedCount)}</>;
+  joinCode?: string;
+  playerSessions?: {
+    playerId: string;
+    joinedAt: number;
+    deviceId?: string;
+  }[];
 }
 
 export default function Game() {
@@ -69,37 +63,131 @@ export default function Game() {
 
   const styles = createStyles(colors);
 
+  // Convex hooks (only when configured)
+  const convexGame = isConvexConfigured()
+    ? require('convex/react').useQuery(
+        require('../../convex/_generated/api').api.games.getGame,
+        { gameId: id }
+      )
+    : undefined;
+
+  const startGameFromLobby = isConvexConfigured()
+    ? require('convex/react').useMutation(
+        require('../../convex/_generated/api').api.games.startGameFromLobby
+      )
+    : null;
+
   useEffect(() => {
-    const savedGame = storageHelpers.getObject<Game>(StorageKeys.CURRENT_GAME);
-    
-    if (savedGame) {
-      setGame(savedGame);
+    // Use Convex data if available, otherwise fall back to local storage
+    if (isConvexConfigured() && convexGame !== undefined) {
+      if (convexGame === null) {
+        // Game not found in Convex
+        router.replace('/');
+        setLoading(false);
+        return;
+      }
 
-      const rounds = savedGame.rounds || [];
-      const currentRoundData = rounds.find(r => r.roundNumber === savedGame.currentRound);
+      // Map Convex game to our Game interface
+      const mappedGame: Game = {
+        id: convexGame._id,
+        numberOfPlayers: convexGame.numberOfPlayers,
+        players: convexGame.players,
+        dealerIndex: convexGame.dealerIndex,
+        currentRound: convexGame.currentRound,
+        status: convexGame.status,
+        createdAt: convexGame.createdAt,
+        joinCode: convexGame.joinCode,
+        playerSessions: convexGame.playerSessions,
+      };
 
-      if (!currentRoundData) {
-        setMode('calling');
-      } else if (currentRoundData.status === 'calling') {
-        setMode('calling');
-      } else if (currentRoundData.status === 'playing') {
-        setMode('playing');
+      setGame(mappedGame);
+
+      // Determine mode based on status
+      if (mappedGame.status === 'lobby') {
+        setMode('lobby');
       } else {
-        setMode('scorecard');
+        const rounds = mappedGame.rounds || [];
+        const currentRoundData = rounds.find(r => r.roundNumber === mappedGame.currentRound);
+
+        if (!currentRoundData) {
+          setMode('calling');
+        } else if (currentRoundData.status === 'calling') {
+          setMode('calling');
+        } else if (currentRoundData.status === 'playing') {
+          setMode('playing');
+        } else {
+          setMode('scorecard');
+        }
       }
-      
-      if (savedGame.id !== id) {
-        router.replace(`/game/${savedGame.id}`);
-      }
+
+      setLoading(false);
     } else {
-      router.replace('/');
+      // Fall back to local storage when Convex is not configured
+      const savedGame = storageHelpers.getObject<Game>(StorageKeys.CURRENT_GAME);
+
+      if (savedGame) {
+        setGame(savedGame);
+
+        // Check if we're in lobby mode
+        if (savedGame.status === 'lobby') {
+          setMode('lobby');
+        } else {
+          const rounds = savedGame.rounds || [];
+          const currentRoundData = rounds.find(r => r.roundNumber === savedGame.currentRound);
+
+          if (!currentRoundData) {
+            setMode('calling');
+          } else if (currentRoundData.status === 'calling') {
+            setMode('calling');
+          } else if (currentRoundData.status === 'playing') {
+            setMode('playing');
+          } else {
+            setMode('scorecard');
+          }
+        }
+
+        if (savedGame.id !== id) {
+          router.replace(`/game/${savedGame.id}`);
+        }
+        setLoading(false);
+      } else {
+        router.replace('/');
+        setLoading(false);
+      }
     }
-    setLoading(false);
-  }, [id, router]);
+  }, [id, router, convexGame]);
 
   const saveGame = (updatedGame: Game) => {
     setGame(updatedGame);
     storageHelpers.setObject(StorageKeys.CURRENT_GAME, updatedGame);
+  };
+
+  const handleLobbyStart = async (dealerIndex: number) => {
+    if (!game) return;
+
+    try {
+      if (isConvexConfigured() && startGameFromLobby) {
+        // Use Convex to start the game (will trigger re-render via useQuery)
+        await startGameFromLobby({
+          gameId: game.id as any, // Convex ID type
+          dealerIndex,
+        });
+        // Mode will be updated automatically when convexGame updates
+      } else {
+        // Fall back to local storage
+        const updatedGame = {
+          ...game,
+          dealerIndex,
+          status: 'in_progress',
+        };
+
+        saveGame(updatedGame);
+        setMode('calling');
+      }
+    } catch (error: any) {
+      console.error('Failed to start game:', error);
+      alert(error.message || 'Failed to start game');
+    }
   };
 
   const handleCallingComplete = (
@@ -189,29 +277,27 @@ export default function Game() {
   const rounds = game.rounds || [];
   const currentRoundData = rounds.find(r => r.roundNumber === game.currentRound);
 
-  // Render CallingMode with Convex subscription for real-time join count
-  const renderCallingMode = (joinedPlayerCount: number) => (
-    <CallingMode
-      players={game.players}
-      dealerIndex={game.dealerIndex}
-      roundNumber={game.currentRound}
-      numberOfPlayers={game.numberOfPlayers}
-      joinCode={game.joinCode}
-      joinedPlayerCount={joinedPlayerCount}
-      onComplete={handleCallingComplete}
-    />
-  );
-
   return (
     <View style={styles.gameContainer}>
+      {mode === 'lobby' && game.joinCode && (
+        <LobbyMode
+          joinCode={game.joinCode}
+          numberOfPlayers={game.numberOfPlayers}
+          players={game.players}
+          onStartGame={handleLobbyStart}
+        />
+      )}
+
       {mode === 'calling' && (
-        isConvexConfigured() && game.convexId ? (
-          <ConvexGameSubscriber convexId={game.convexId}>
-            {(joinedCount) => renderCallingMode(joinedCount)}
-          </ConvexGameSubscriber>
-        ) : (
-          renderCallingMode(0)
-        )
+        <CallingMode
+          players={game.players}
+          dealerIndex={game.dealerIndex}
+          roundNumber={game.currentRound}
+          numberOfPlayers={game.numberOfPlayers}
+          joinCode={game.joinCode}
+          joinedPlayerCount={game.playerSessions?.length || 0}
+          onComplete={handleCallingComplete}
+        />
       )}
 
       {mode === 'playing' && currentRoundData && (

@@ -8,6 +8,7 @@ import { v } from 'convex/values';
 export default defineSchema({
   games: defineTable({
     status: v.union(
+      v.literal('lobby'),
       v.literal('setup'),
       v.literal('in_progress'),
       v.literal('completed')
