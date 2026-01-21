@@ -63,8 +63,11 @@ export default function Game() {
 
   const styles = createStyles(colors);
 
-  // Convex hooks (only when configured)
-  const convexGame = isConvexConfigured()
+  // Check if ID looks like a local game ID (starts with "game_") vs Convex ID
+  const isLocalGameId = id?.startsWith('game_');
+
+  // Convex hooks (only when configured and ID is a Convex ID)
+  const convexGame = isConvexConfigured() && !isLocalGameId
     ? require('convex/react').useQuery(
         require('../../convex/_generated/api').api.games.getGame,
         { gameId: id }
