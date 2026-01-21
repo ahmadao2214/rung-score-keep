@@ -7,6 +7,7 @@ import { ScorecardMode } from '../../components/game/ScorecardMode';
 import { storageHelpers, StorageKeys } from '../../lib/mmkv';
 import { TrumpCard as TrumpCardType } from '../../utils/trump';
 import { useTheme } from '../../lib/theme';
+import { isConvexConfigured } from '../../lib/convex';
 
 type GameMode = 'calling' | 'playing' | 'scorecard';
 
@@ -36,6 +37,8 @@ interface Round {
 
 interface Game {
   id: string;
+  convexId?: string;
+  joinCode?: string;
   numberOfPlayers: number;
   players: Player[];
   dealerIndex: number;
@@ -43,6 +46,17 @@ interface Game {
   status: string;
   createdAt: number;
   rounds?: Round[];
+}
+
+// Component that subscribes to Convex for real-time player join updates
+function ConvexGameSubscriber({ convexId, children }: { convexId: string; children: (joinedCount: number) => React.ReactNode }) {
+  const { useQuery } = require('convex/react');
+  const { api } = require('../../convex/_generated/api');
+
+  const convexGame = useQuery(api.games.getGame, { gameId: convexId });
+  const joinedCount = convexGame?.playerSessions?.length || 0;
+
+  return <>{children(joinedCount)}</>;
 }
 
 export default function Game() {
@@ -175,16 +189,29 @@ export default function Game() {
   const rounds = game.rounds || [];
   const currentRoundData = rounds.find(r => r.roundNumber === game.currentRound);
 
+  // Render CallingMode with Convex subscription for real-time join count
+  const renderCallingMode = (joinedPlayerCount: number) => (
+    <CallingMode
+      players={game.players}
+      dealerIndex={game.dealerIndex}
+      roundNumber={game.currentRound}
+      numberOfPlayers={game.numberOfPlayers}
+      joinCode={game.joinCode}
+      joinedPlayerCount={joinedPlayerCount}
+      onComplete={handleCallingComplete}
+    />
+  );
+
   return (
     <View style={styles.gameContainer}>
       {mode === 'calling' && (
-        <CallingMode
-          players={game.players}
-          dealerIndex={game.dealerIndex}
-          roundNumber={game.currentRound}
-          numberOfPlayers={game.numberOfPlayers}
-          onComplete={handleCallingComplete}
-        />
+        isConvexConfigured() && game.convexId ? (
+          <ConvexGameSubscriber convexId={game.convexId}>
+            {(joinedCount) => renderCallingMode(joinedCount)}
+          </ConvexGameSubscriber>
+        ) : (
+          renderCallingMode(0)
+        )
       )}
 
       {mode === 'playing' && currentRoundData && (

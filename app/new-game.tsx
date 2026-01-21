@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { validatePlayerNames, isValidPlayerCount, isValidDealerIndex } from '../utils/validation';
 import { storageHelpers, StorageKeys } from '../lib/mmkv';
 import { useTheme } from '../lib/theme';
+import { isConvexConfigured } from '../lib/convex';
 
 const PLAYER_EMOJIS = [
   '😊', '😎', '🤓', '🥳', '😈', '👻', '🤖', '👽',
@@ -25,6 +26,16 @@ export default function NewGame() {
   const [dealerIndex, setDealerIndex] = useState(0);
   const [errors, setErrors] = useState<{ players?: string; general?: string }>({});
   const [emojiPickerIndex, setEmojiPickerIndex] = useState<number | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
+
+  // Conditionally use Convex mutation when configured
+  const convexConfigured = isConvexConfigured();
+  let createGame: any = null;
+  if (convexConfigured) {
+    const { useMutation } = require('convex/react');
+    const { api } = require('../convex/_generated/api');
+    createGame = useMutation(api.games.createGame);
+  }
 
   const handlePlayerCountChange = (count: number) => {
     if (!isValidPlayerCount(count)) return;
@@ -57,7 +68,7 @@ export default function NewGame() {
     setEmojiPickerIndex(null);
   };
 
-  const handleStartGame = () => {
+  const handleStartGame = async () => {
     const nameValidation = validatePlayerNames(playerNames);
     if (!nameValidation.isValid) {
       setErrors({ players: nameValidation.error });
@@ -71,23 +82,64 @@ export default function NewGame() {
       return;
     }
 
-    const game = {
-      id: `game_${Date.now()}`,
-      numberOfPlayers,
-      players: playerNames.map((name, index) => ({
-        id: `player_${Date.now()}_${index}`,
-        name: name.trim(),
-        position: index,
-        emoji: playerEmojis[index] || '😊',
-      })),
-      dealerIndex,
-      currentRound: 1,
-      status: 'in_progress',
-      createdAt: Date.now(),
-    };
+    setIsCreating(true);
 
-    storageHelpers.setObject(StorageKeys.CURRENT_GAME, game);
-    router.push(`/game/${game.id}`);
+    try {
+      const players = playerNames.map((name, index) => ({
+        name: name.trim(),
+        emoji: playerEmojis[index] || '😊',
+      }));
+
+      let gameId: string;
+      let joinCode: string | undefined;
+      let convexGameId: string | undefined;
+
+      // Try to create Convex game if configured
+      if (convexConfigured && createGame) {
+        try {
+          const result = await createGame({
+            numberOfPlayers,
+            players,
+            dealerIndex,
+          });
+          convexGameId = result.gameId as string;
+          joinCode = result.joinCode;
+          gameId = convexGameId; // Use Convex ID as primary ID
+        } catch (err) {
+          console.error('Failed to create Convex game:', err);
+          // Fall back to local-only game
+          gameId = `game_${Date.now()}`;
+        }
+      } else {
+        // Local-only game
+        gameId = `game_${Date.now()}`;
+      }
+
+      const game = {
+        id: gameId,
+        convexId: convexGameId, // Store Convex ID separately for reference
+        joinCode, // Store join code for QR display
+        numberOfPlayers,
+        players: players.map((player, index) => ({
+          id: `player_${Date.now()}_${index}`,
+          name: player.name,
+          position: index,
+          emoji: player.emoji,
+        })),
+        dealerIndex,
+        currentRound: 1,
+        status: 'in_progress',
+        createdAt: Date.now(),
+      };
+
+      storageHelpers.setObject(StorageKeys.CURRENT_GAME, game);
+      router.push(`/game/${game.id}`);
+    } catch (err) {
+      console.error('Error creating game:', err);
+      Alert.alert('Error', 'Failed to create game. Please try again.');
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   const styles = createStyles(colors);
@@ -198,8 +250,14 @@ export default function NewGame() {
           </View>
         </View>
 
-        <Pressable style={styles.startButton} onPress={handleStartGame}>
-          <Text style={styles.startButtonText}>Start Game</Text>
+        <Pressable
+          style={[styles.startButton, isCreating && styles.startButtonDisabled]}
+          onPress={handleStartGame}
+          disabled={isCreating}
+        >
+          <Text style={styles.startButtonText}>
+            {isCreating ? 'Creating Game...' : 'Start Game'}
+          </Text>
         </Pressable>
 
         <View style={{ height: 40 }} />
@@ -411,6 +469,9 @@ const createStyles = (colors: any) => StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 18,
     fontWeight: '700',
+  },
+  startButtonDisabled: {
+    opacity: 0.6,
   },
   modalOverlay: {
     flex: 1,
